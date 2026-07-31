@@ -1,5 +1,6 @@
 import os
 import random
+import re
 import numpy as np
 import shutil
 import torch
@@ -21,14 +22,34 @@ def setup_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
+CKPT_RE = re.compile(r'^(\d+)_(\d+)(?:_valloss([\d.]+))?\.ckpt$')
+
+def prune_checkpoints(dir_ckpt, latest_path, max_keep):
+    """Keep the max_keep checkpoints with the lowest embedded val loss, plus latest_path."""
+    entries = []
+    for fname in os.listdir(dir_ckpt):
+        m = CKPT_RE.match(fname)
+        if not m:
+            continue
+        val_loss = float(m.group(3)) if m.group(3) is not None else float('inf')
+        entries.append((val_loss, os.path.join(dir_ckpt, fname)))
+
+    keep = {latest_path}
+    entries.sort(key=lambda e: e[0])
+    keep.update(path for _, path in entries[:max_keep])
+
+    for _, path in entries:
+        if path not in keep and os.path.exists(path):
+            os.remove(path)
+
 def train_main_model(opts):
     setup_seed(1111)
     dir_exp = os.path.join("./experiments", opts.name_exp)
     dir_sample = os.path.join(dir_exp, "samples")
     dir_ckpt = os.path.join(dir_exp, "checkpoints")
     dir_log = os.path.join(dir_exp, "logs")
-    logfile_train = open(os.path.join(dir_log, "train_loss_log.txt"), 'w')
-    logfile_val = open(os.path.join(dir_log, "val_loss_log.txt"), 'w')
+    logfile_train = open(os.path.join(dir_log, "train_loss_log.txt"), 'a' if opts.resume else 'w')
+    logfile_val = open(os.path.join(dir_log, "val_loss_log.txt"), 'a' if opts.resume else 'w')
 
     train_loader = get_loader(opts.data_root, opts.img_size, opts.language, opts.char_num, opts.max_seq_len, opts.dim_seq, opts.batch_size, opts.mode)
     val_loader = get_loader(opts.data_root, opts.img_size, opts.language, opts.char_num, opts.max_seq_len, opts.dim_seq, opts.batch_size_val, 'test')
@@ -39,18 +60,30 @@ def train_main_model(opts):
         model_main = torch.nn.DataParallel(model_main)
     
     model_main.cuda()
-    
+
     parameters_all = [{"params": model_main.img_encoder.parameters()}, {"params": model_main.img_decoder.parameters()},
                         {"params": model_main.modality_fusion.parameters()}, {"params": model_main.transformer_main.parameters()},
                         {"params": model_main.transformer_seqdec.parameters()}]
-    
+
     optimizer = Adam(parameters_all, lr=opts.lr, betas=(opts.beta1, opts.beta2), eps=opts.eps, weight_decay=opts.weight_decay)
+
+    start_epoch = opts.init_epoch
+    if opts.resume:
+        ckpt_path = os.path.join(dir_ckpt, opts.name_ckpt)
+        checkpoint = torch.load(ckpt_path, map_location='cuda')
+        model_main.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['opt'])
+        start_epoch = checkpoint['n_epoch'] + 1
+        print(f"Resumed from {ckpt_path}, starting at epoch {start_epoch}")
+
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.997)
-    
+
     if opts.tboard:
         writer = SummaryWriter(dir_log)
 
-    for epoch in range(opts.init_epoch, opts.n_epochs):
+    last_val_metric = None
+
+    for epoch in range(start_epoch, opts.n_epochs):
         for idx, data in enumerate(train_loader):
             for key in data: data[key] = data[key].cuda()
             ret_dict, loss_dict = model_main(data)
@@ -115,7 +148,9 @@ def train_main_model(opts):
 
                     for loss_cat in ['img', 'svg']:
                         for key, _ in loss_val[loss_cat].items():
-                            loss_val[loss_cat][key] /= len(val_loader) 
+                            loss_val[loss_cat][key] /= len(val_loader)
+
+                    last_val_metric = float(opts.loss_w_l1 * loss_val['img']['l1'] + opts.loss_w_pt_c * loss_val['img']['vggpt'] + loss_val['svg']['total'])
 
                     if opts.tboard:
                         for loss_cat in ['img', 'svg']:
@@ -138,10 +173,15 @@ def train_main_model(opts):
         scheduler.step()
 
         if epoch % opts.freq_ckpt == 0:
+            ckpt_name = f'{epoch}_{batches_done}.ckpt' if last_val_metric is None else f'{epoch}_{batches_done}_valloss{last_val_metric:.4f}.ckpt'
+            ckpt_path = os.path.join(dir_ckpt, ckpt_name)
             if opts.multi_gpu:
-                torch.save({'model':model_main.module.state_dict(), 'opt':optimizer.state_dict(), 'n_epoch':epoch, 'n_iter':batches_done}, f'{dir_ckpt}/{epoch}_{batches_done}.ckpt')
+                torch.save({'model':model_main.module.state_dict(), 'opt':optimizer.state_dict(), 'n_epoch':epoch, 'n_iter':batches_done}, ckpt_path)
             else:
-                torch.save({'model':model_main.state_dict(), 'opt':optimizer.state_dict(), 'n_epoch':epoch, 'n_iter':batches_done}, f'{dir_ckpt}/{epoch}_{batches_done}.ckpt')
+                torch.save({'model':model_main.state_dict(), 'opt':optimizer.state_dict(), 'n_epoch':epoch, 'n_iter':batches_done}, ckpt_path)
+
+            if opts.max_ckpt_keep > 0:
+                prune_checkpoints(dir_ckpt, ckpt_path, opts.max_ckpt_keep)
 
     logfile_train.close()
     logfile_val.close()

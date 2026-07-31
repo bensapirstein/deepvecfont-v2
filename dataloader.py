@@ -38,7 +38,7 @@ class SVGDataset(data.Dataset):
         item['pts_aux'] = torch.FloatTensor(np.load(os.path.join(font_path, 'pts_aux.npy')))
         item['rendered'] = torch.FloatTensor(np.load(os.path.join(font_path, 'rendered_' + str(self.img_size) + '.npy'))).view(self.char_num, self.img_size, self.img_size) / 255.
         item['rendered'] = self.trans(item['rendered'])
-        item['font_id'] = torch.FloatTensor(np.load(os.path.join(font_path, 'font_id.npy')).astype(np.float32))
+        item['font_id'] = torch.FloatTensor(np.atleast_1d(np.load(os.path.join(font_path, 'font_id.npy')).astype(np.float32)))
         return item
 
     def __len__(self):
