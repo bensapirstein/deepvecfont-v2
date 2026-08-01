@@ -4,7 +4,7 @@ the average L1 distance (on binarized 64x64 masks) between each synthesized glyp
 rasterized image and its ground-truth glyph image, using the best-of-N_s candidate
 already selected by test_few_shot.py (highest IOU vs. the image decoder's own output).
 
-Run test_few_shot.py first so that experiments/{name_exp}/results/*/svgs_merge/*.html exist.
+Run test_few_shot.py first so that experiments/{name_exp}/results/{name_ckpt}/*/svgs_merge/*.html exist.
 """
 import argparse
 import glob
@@ -41,11 +41,12 @@ def cal_iou_l1(mask_arr1, mask_arr2):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--exp_dir', required=True, help='e.g. experiments/dvf_base_exp_chn_main_model')
+    parser.add_argument('--name_ckpt', required=True, help='e.g. 125_5040_valloss3.8273.ckpt; results live under exp_dir/results/name_ckpt/')
     parser.add_argument('--char_num', type=int, default=52)
     parser.add_argument('--img_size', type=int, default=64)
     args = parser.parse_args()
 
-    results_dir = os.path.join(args.exp_dir, 'results')
+    results_dir = os.path.join(args.exp_dir, 'results', args.name_ckpt)
     font_dirs = sorted(glob.glob(os.path.join(results_dir, '*')))
 
     all_l1, all_iou, per_font = [], [], []

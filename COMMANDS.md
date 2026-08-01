@@ -6,6 +6,7 @@ Notes:
 - `[CKPT]` = checkpoint filename, found in `experiments/<name_exp>_<model_name>/checkpoints/`.
   List available ones with: `ls experiments/<name_exp>_main_model/checkpoints/`
 - Pick a free GPU id with `nvidia-smi` before setting `CUDA_VISIBLE_DEVICES`.
+- Conda env: `dvf_v2` (`conda activate dvf_v2`). Needed for all commands below (has torch, cairosvg, etc.).
 
 ## Training
 
@@ -44,3 +45,16 @@ CUDA_VISIBLE_DEVICES=2 python test_few_shot.py --mode test --name_exp dvf_base_e
 ```
 
 `ref_char_ids` picks which characters are used as references (default `0,1,26,27` = A, B, a, b); adjust to taste.
+
+## Evaluation (reconstruction error, Table 2 metric)
+
+Run after `test_few_shot.py` so `experiments/{name_exp}/results/{name_ckpt}/*/svgs_merge/*.html` exist.
+
+```
+python eval_reconstruction_error.py --exp_dir experiments/dvf_base_exp_chn_main_model --name_ckpt [CKPT]
+```
+
+For English, swap `--exp_dir` to `experiments/dvf_base_exp_eng_main_model`.
+
+Results so far:
+- chn `125_5040_valloss3.8273.ckpt`: L1=0.1668, mean IOU=0.2550 (34 fonts, 1768 glyphs) (2026-08-01)
