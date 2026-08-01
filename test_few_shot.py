@@ -12,7 +12,8 @@ from models.util_funcs import svg2img, cal_iou
 
 def test_main_model(opts):
 
-    dir_res = os.path.join("./experiments/", opts.name_exp, "results")
+    dir_res = os.path.join("./experiments/", opts.name_exp, "results", opts.name_ckpt)
+    os.makedirs(dir_res, exist_ok=True)
 
     test_loader = get_loader(opts.data_root, opts.img_size, opts.language, opts.char_num, opts.max_seq_len, opts.dim_seq, opts.batch_size, 'test')
 
@@ -25,17 +26,23 @@ def test_main_model(opts):
     with torch.no_grad():
         
         for test_idx, test_data in enumerate(test_loader):
+
+            dir_save = os.path.join(dir_res, "%04d"%test_idx)
+            svg_merge_dir = os.path.join(dir_save, "svgs_merge")
+            merge_outfile = os.path.join(svg_merge_dir, f"{opts.name_ckpt}_syn_merge_{test_idx}.html")
+            if os.path.exists(merge_outfile):
+                print("skipping font %04d, already done ..."%test_idx)
+                continue
+
             for key in test_data: test_data[key] = test_data[key].cuda()
 
             print("testing font %04d ..."%test_idx)
 
-            dir_save = os.path.join(dir_res, "%04d"%test_idx)
             if not os.path.exists(dir_save):
                 os.mkdir(dir_save)
                 os.mkdir(os.path.join(dir_save, "imgs"))
                 os.mkdir(os.path.join(dir_save, "svgs_single"))
                 os.mkdir(os.path.join(dir_save, "svgs_merge"))
-            svg_merge_dir = os.path.join(dir_save, "svgs_merge")
 
             iou_max = np.zeros(opts.char_num)
             idx_best_sample = np.zeros(opts.char_num)

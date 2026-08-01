@@ -24,6 +24,26 @@ def setup_seed(seed):
 
 CKPT_RE = re.compile(r'^(\d+)_(\d+)(?:_valloss([\d.]+))?\.ckpt$')
 
+def compute_val_loss(model_main, val_loader, opts):
+    loss_val = {'img':{'l1':0.0, 'vggpt':0.0}, 'svg':{'total':0.0, 'cmd':0.0, 'args':0.0, 'aux':0.0},
+                'svg_para':{'total':0.0, 'cmd':0.0, 'args':0.0, 'aux':0.0}}
+    with torch.no_grad():
+        model_main.eval()
+        for val_data in val_loader:
+            for key in val_data: val_data[key] = val_data[key].cuda()
+            ret_dict_val, loss_dict_val = model_main(val_data, mode='val')
+            for loss_cat in ['img', 'svg']:
+                for key, _ in loss_val[loss_cat].items():
+                    loss_val[loss_cat][key] += loss_dict_val[loss_cat][key]
+        model_main.train()
+
+    for loss_cat in ['img', 'svg']:
+        for key, _ in loss_val[loss_cat].items():
+            loss_val[loss_cat][key] /= len(val_loader)
+
+    val_metric = float(opts.loss_w_l1 * loss_val['img']['l1'] + opts.loss_w_pt_c * loss_val['img']['vggpt'] + loss_val['svg']['total'])
+    return loss_val, val_metric
+
 def prune_checkpoints(dir_ckpt, latest_path, max_keep):
     """Keep the max_keep checkpoints with the lowest embedded val loss, plus latest_path."""
     entries = []
@@ -81,8 +101,6 @@ def train_main_model(opts):
     if opts.tboard:
         writer = SummaryWriter(dir_log)
 
-    last_val_metric = None
-
     for epoch in range(start_epoch, opts.n_epochs):
         for idx, data in enumerate(train_loader):
             for key in data: data[key] = data[key].cuda()
@@ -134,46 +152,31 @@ def train_main_model(opts):
                 
             if opts.freq_val > 0 and batches_done % opts.freq_val == 0:
 
-                with torch.no_grad():
-                    model_main.eval()
-                    loss_val = {'img':{'l1':0.0, 'vggpt':0.0}, 'svg':{'total':0.0, 'cmd':0.0, 'args':0.0, 'aux':0.0},
-                                'svg_para':{'total':0.0, 'cmd':0.0, 'args':0.0, 'aux':0.0}}
-                    
-                    for val_idx, val_data in enumerate(val_loader):
-                        for key in val_data: val_data[key] = val_data[key].cuda()
-                        ret_dict_val, loss_dict_val = model_main(val_data, mode='val')
-                        for loss_cat in ['img', 'svg']:
-                            for key, _ in loss_val[loss_cat].items():
-                                loss_val[loss_cat][key] += loss_dict_val[loss_cat][key]
+                loss_val, last_val_metric = compute_val_loss(model_main, val_loader, opts)
 
+                if opts.tboard:
                     for loss_cat in ['img', 'svg']:
                         for key, _ in loss_val[loss_cat].items():
-                            loss_val[loss_cat][key] /= len(val_loader)
+                            writer.add_scalar(f'VAL/loss_{loss_cat}_{key}', loss_val[loss_cat][key], batches_done)
 
-                    last_val_metric = float(opts.loss_w_l1 * loss_val['img']['l1'] + opts.loss_w_pt_c * loss_val['img']['vggpt'] + loss_val['svg']['total'])
+                val_msg = (
+                    f"Epoch: {epoch}/{opts.n_epochs}, Batch: {idx}/{len(train_loader)}, "
+                    f"Val loss img l1: {loss_val['img']['l1']: .6f}, "
+                    f"Val loss img pt: {loss_val['img']['vggpt']: .6f}, "
+                    f"Val loss total: {loss_val['svg']['total']: .6f}, "
+                    f"Val loss cmd: {loss_val['svg']['cmd']: .6f}, "
+                    f"Val loss args: {loss_val['svg']['args']: .6f}, "
+                )
 
-                    if opts.tboard:
-                        for loss_cat in ['img', 'svg']:
-                            for key, _ in loss_val[loss_cat].items():
-                                writer.add_scalar(f'VAL/loss_{loss_cat}_{key}', loss_val[loss_cat][key], batches_done)
-                        
-                    val_msg = (
-                        f"Epoch: {epoch}/{opts.n_epochs}, Batch: {idx}/{len(train_loader)}, "
-                        f"Val loss img l1: {loss_val['img']['l1']: .6f}, "
-                        f"Val loss img pt: {loss_val['img']['vggpt']: .6f}, "
-                        f"Val loss total: {loss_val['svg']['total']: .6f}, "
-                        f"Val loss cmd: {loss_val['svg']['cmd']: .6f}, "
-                        f"Val loss args: {loss_val['svg']['args']: .6f}, "
-                    )
-
-                    logfile_val.write(val_msg + "\n")
-                    print(val_msg)
+                logfile_val.write(val_msg + "\n")
+                print(val_msg)
         
 
         scheduler.step()
 
         if epoch % opts.freq_ckpt == 0:
-            ckpt_name = f'{epoch}_{batches_done}.ckpt' if last_val_metric is None else f'{epoch}_{batches_done}_valloss{last_val_metric:.4f}.ckpt'
+            _, last_val_metric = compute_val_loss(model_main, val_loader, opts)
+            ckpt_name = f'{epoch}_{batches_done}_valloss{last_val_metric:.4f}.ckpt'
             ckpt_path = os.path.join(dir_ckpt, ckpt_name)
             if opts.multi_gpu:
                 torch.save({'model':model_main.module.state_dict(), 'opt':optimizer.state_dict(), 'n_epoch':epoch, 'n_iter':batches_done}, ckpt_path)
