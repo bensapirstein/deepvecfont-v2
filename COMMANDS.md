@@ -7,6 +7,7 @@ Notes:
   List available ones with: `ls experiments/<name_exp>_main_model/checkpoints/`
 - Pick a free GPU id with `nvidia-smi` before setting `CUDA_VISIBLE_DEVICES`.
 - Conda env: `dvf_v2` (`conda activate dvf_v2`). Needed for all commands below (has torch, cairosvg, etc.).
+- `experiments/` is a symlink to `../gpufs/experiments` (same pattern as `data/`), gitignored via the (slash-less) `experiments` line in `.gitignore` — a trailing-slash pattern wouldn't match a symlink. Note `~/gpufs` is on the same disk as everything else here (not separate storage), so this doesn't save disk space; it was done anyway for consistency with `data/`.
 
 ## Training
 
