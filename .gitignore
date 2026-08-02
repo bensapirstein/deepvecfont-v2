@@ -1,6 +1,14 @@
+# `data` and `experiments` are symlinks to /data/bens/deepvecfont-v2 on the cluster.
+# Both patterns must stay SLASH-LESS: a trailing slash does not match a symlink.
 data
-experiments/
+experiments
+data.zip
+*.zip
+*.ckpt
 nohup.out
+nohup*.out
+wandb/
+.DS_Store
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
