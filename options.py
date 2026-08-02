@@ -1,5 +1,19 @@
 import argparse
 
+
+def str2bool(v):
+    """argparse's `type=bool` maps any non-empty string to True, so `--flag False`
+    silently enables the flag. Used for new boolean flags; the pre-existing ones
+    (--resume, --multi_gpu, --tboard) still carry that behaviour."""
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    if v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    raise argparse.ArgumentTypeError(f'expected a boolean value, got {v!r}')
+
+
 def get_parser_main_model():
     parser = argparse.ArgumentParser()
     # basic parameters training related
@@ -19,6 +33,7 @@ def get_parser_main_model():
     parser.add_argument('--ngf', type=int, default=16, help='the basic num of channel in image encoder and decoder')
     parser.add_argument('--n_aux_pts', type=int, default=6, help='the number of aux pts in bezier curves for additional supervison')
     # experiment related
+    parser.add_argument('--seed', type=int, default=1111, help='random seed for torch, cuda, numpy and random')
     parser.add_argument('--random_index', type=str, default='00')
     parser.add_argument('--name_ckpt', type=str, default='600_192921.ckpt')
     parser.add_argument('--init_epoch', type=int, default=0, help='init epoch')
@@ -33,7 +48,7 @@ def get_parser_main_model():
     parser.add_argument('--name_exp', type=str, default='dvf')
     parser.add_argument('--data_root', type=str, default='./data/vecfont_dataset/')
     parser.add_argument('--freq_ckpt', type=int, default=50, help='save checkpoint frequency of epoch')
-    parser.add_argument('--max_ckpt_keep', type=int, default=-1, help='keep only the N checkpoints with the lowest validation loss (plus the latest, for resuming); -1 keeps all')
+    parser.add_argument('--max_ckpt_keep', type=int, default=1, help='keep only the N checkpoints with the lowest validation loss (plus the latest, for resuming); -1 keeps all')
     parser.add_argument('--freq_sample', type=int, default=500, help='sample train output of steps')
     parser.add_argument('--freq_log', type=int, default=50, help='freq of showing logs')
     parser.add_argument('--freq_val', type=int, default=500, help='sample validate output of steps')
@@ -42,6 +57,7 @@ def get_parser_main_model():
     parser.add_argument('--eps', type=float, default=1e-8, help='Adam epsilon')
     parser.add_argument('--weight_decay', type=float, default=0.0, help='weight decay')
     parser.add_argument('--tboard', type=bool, default=True, help='whether use tensorboard to visulize loss')
+    parser.add_argument('--wandb', type=str2bool, default=True, help='mirror scalar logging to Weights & Biases (metrics only, no artifacts); degrades to a no-op if wandb is not installed')
 
     # loss weight
     parser.add_argument('--kl_beta', type=float, default=0.01, help='latent code kl loss beta')
@@ -51,5 +67,13 @@ def get_parser_main_model():
     parser.add_argument('--loss_w_args', type=float, default=1.0, help='the weight of args loss')
     parser.add_argument('--loss_w_aux', type=float, default=0.01, help='the weight of pts aux loss')
     parser.add_argument('--loss_w_smt', type=float, default=10., help='the weight of smooth loss')
-                            
+
+    # Stage 2 experiment flags. Declared here so runs are reproducible from opts.txt
+    # from the start; NOT yet wired into the model. Defaults reproduce current behaviour:
+    #   enc_noise_std_*  -> models/transformers.py, `x = x + torch.randn_like(x)` (sigma is implicitly 1.0)
+    #   dropout          -> MultiHeadedAttention / PositionwiseFeedForward / attn_dropout / ff_dropout (all 0.0)
+    parser.add_argument('--enc_noise_std_train', type=float, default=1.0, help='[stage 2, not yet wired] sigma of the gaussian perturbation on the sequence-encoder output during training')
+    parser.add_argument('--enc_noise_std_test', type=float, default=1.0, help='[stage 2, not yet wired] sigma of the same perturbation at val/test time; the only source of stochasticity across the n_samples candidates')
+    parser.add_argument('--dropout', type=float, default=0.0, help='[stage 2, not yet wired] dropout rate shared by the attention and feed-forward sublayers of both transformer stacks')
+
     return parser

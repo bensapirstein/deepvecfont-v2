@@ -7,7 +7,28 @@ Notes:
   List available ones with: `ls experiments/<name_exp>_main_model/checkpoints/`
 - Pick a free GPU id with `nvidia-smi` before setting `CUDA_VISIBLE_DEVICES`.
 - Conda env: `dvf_v2` (`conda activate dvf_v2`). Needed for all commands below (has torch, cairosvg, etc.).
-- `experiments/` is a symlink to `../gpufs/experiments` (same pattern as `data/`), gitignored via the (slash-less) `experiments` line in `.gitignore` — a trailing-slash pattern wouldn't match a symlink. Note `~/gpufs` is on the same disk as everything else here (not separate storage), so this doesn't save disk space; it was done anyway for consistency with `data/`.
+- `data/` and `experiments/` are symlinks to `/data/bens/deepvecfont-v2/` (repointed 2026-08-03, previously `~/gpufs`). This is real separate storage, unlike the old target. Both must be gitignored via slash-less `data` / `experiments` lines — a trailing-slash pattern wouldn't match a symlink, and `.gitignore` currently still has `experiments/`, so fix that before the first `git add`.
+
+## Storage
+
+`/data/bens` quota: **200 GB**. Planning arithmetic in `PROJECT_PLAN.md` §7.3.
+
+| Item | Size |
+|---|---|
+| Dataset, unzipped | ~30 GB |
+| One checkpoint | 1.2 GB (roughly ⅓ model, ⅔ Adam optimizer state) |
+| Confirmation eval, 34 fonts @ `n_samples 50` | ~1 GB |
+| Screening eval, 8 fonts @ `n_samples 3` | ~15 MB |
+
+About 33 training runs are planned, so at `--max_ckpt_keep 1` (best + latest = 2 files) that is ~79 GB of checkpoints. `2` costs ~119 GB and still fits; `3` costs ~158 GB and does not, once data and results are counted.
+
+Check headroom before launching anything long:
+
+```
+df -h /data/bens && du -sh /data/bens/deepvecfont-v2/*
+```
+
+Housekeeping: delete checkpoints of any candidate that has been screened and dropped, and delete screening eval trees once the numbers are recorded. Neither is needed again.
 
 ## Training
 
@@ -22,7 +43,7 @@ Last used: `--name_ckpt 100_4040_valloss4.0329.ckpt`
 ### English (eng)
 
 ```
-CUDA_VISIBLE_DEVICES=1 nohup python train.py --mode train --name_exp dvf_base_exp_eng --model_name main_model --batch_size 32 --max_seq_len 51 --language eng --ref_nshot 4 --resume True --name_ckpt [CKPT] --freq_ckpt 5 --max_ckpt_keep 3 --n_epochs 201
+CUDA_VISIBLE_DEVICES=1 nohup python train.py --mode train --name_exp dvf_base_exp_eng --model_name main_model --batch_size 32 --max_seq_len 51 --language eng --ref_nshot 4 --freq_ckpt 20 --max_ckpt_keep 3 --n_epochs 801
 ```
 
 Latest checkpoint available: `600_192921_valloss2.0824.ckpt`

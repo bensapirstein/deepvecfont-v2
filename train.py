@@ -15,6 +15,11 @@ from models.model_main import ModelMain
 from options import get_parser_main_model
 from data_utils.svg_utils import render
 
+try:
+    import wandb
+except ImportError:
+    wandb = None
+
 def setup_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -63,7 +68,7 @@ def prune_checkpoints(dir_ckpt, latest_path, max_keep):
             os.remove(path)
 
 def train_main_model(opts):
-    setup_seed(1111)
+    setup_seed(opts.seed)
     dir_exp = os.path.join("./experiments", opts.name_exp)
     dir_sample = os.path.join(dir_exp, "samples")
     dir_ckpt = os.path.join(dir_exp, "checkpoints")
@@ -101,6 +106,15 @@ def train_main_model(opts):
     if opts.tboard:
         writer = SummaryWriter(dir_log)
 
+    use_wandb = bool(opts.wandb) and wandb is not None
+    if opts.wandb and wandb is None:
+        print("WARNING: --wandb is set but wandb is not installed; continuing without it. `pip install wandb`")
+    if use_wandb:
+        wandb.init(project="deepvecfont-v2", name=opts.name_exp, config=vars(opts), tags=[opts.language])
+
+    loss_img_items = ['l1', 'vggpt']
+    loss_svg_items = ['total', 'cmd', 'args', 'aux', 'smt']
+
     for epoch in range(start_epoch, opts.n_epochs):
         for idx, data in enumerate(train_loader):
             for key in data: data[key] = data[key].cuda()
@@ -132,8 +146,6 @@ def train_main_model(opts):
                 print(message)
                 if opts.tboard:
                     writer.add_scalar('Loss/loss', loss.item(), batches_done)
-                    loss_img_items = ['l1', 'vggpt']
-                    loss_svg_items = ['total', 'cmd', 'args', 'aux', 'smt']
                     for item in loss_img_items:
                         writer.add_scalar(f'Loss/img_{item}', loss_dict['img'][item].item(), batches_done)
                     for item in loss_svg_items:
@@ -143,6 +155,22 @@ def train_main_model(opts):
                     writer.add_scalar('Loss/img_kl_loss', opts.kl_beta * loss_dict['kl'].item(), batches_done)
                     writer.add_image('Images/trg_img', ret_dict['img']['trg'][0], batches_done)
                     writer.add_image('Images/img_output', ret_dict['img']['out'][0], batches_done)
+
+                if use_wandb:
+                    # Same tag names as TensorboardX so the two dashboards read identically.
+                    # One dict per step: repeated wandb.log calls at the same step can drop keys.
+                    # Images are deliberately not mirrored (metrics only, no artifact uploads).
+                    wandb_log = {'Loss/loss': loss.item()}
+                    for item in loss_img_items:
+                        wandb_log[f'Loss/img_{item}'] = loss_dict['img'][item].item()
+                    for item in loss_svg_items:
+                        wandb_log[f'Loss/svg_{item}'] = loss_dict['svg'][item].item()
+                    for item in loss_svg_items:
+                        wandb_log[f'Loss/svg_para_{item}'] = loss_dict['svg_para'][item].item()
+                    wandb_log['Loss/img_kl_loss'] = opts.kl_beta * loss_dict['kl'].item()
+                    wandb_log['lr'] = optimizer.param_groups[0]['lr']
+                    wandb_log['epoch'] = epoch
+                    wandb.log(wandb_log, step=batches_done)
 
             if opts.freq_sample > 0 and batches_done % opts.freq_sample == 0:
                 
@@ -158,6 +186,13 @@ def train_main_model(opts):
                     for loss_cat in ['img', 'svg']:
                         for key, _ in loss_val[loss_cat].items():
                             writer.add_scalar(f'VAL/loss_{loss_cat}_{key}', loss_val[loss_cat][key], batches_done)
+
+                if use_wandb:
+                    wandb_val_log = {f'VAL/loss_{loss_cat}_{key}': float(loss_val[loss_cat][key])
+                                     for loss_cat in ['img', 'svg']
+                                     for key in loss_val[loss_cat]}
+                    wandb_val_log['VAL/val_metric'] = last_val_metric
+                    wandb.log(wandb_val_log, step=batches_done)
 
                 val_msg = (
                     f"Epoch: {epoch}/{opts.n_epochs}, Batch: {idx}/{len(train_loader)}, "
@@ -183,11 +218,16 @@ def train_main_model(opts):
             else:
                 torch.save({'model':model_main.state_dict(), 'opt':optimizer.state_dict(), 'n_epoch':epoch, 'n_iter':batches_done}, ckpt_path)
 
+            if use_wandb:
+                wandb.log({'CKPT/val_metric': last_val_metric, 'CKPT/epoch': epoch}, step=batches_done)
+
             if opts.max_ckpt_keep > 0:
                 prune_checkpoints(dir_ckpt, ckpt_path, opts.max_ckpt_keep)
 
     logfile_train.close()
     logfile_val.close()
+    if use_wandb:
+        wandb.finish()
 
 def backup_code(name_exp):
     os.makedirs(os.path.join('experiments', name_exp, 'code'), exist_ok=True)
