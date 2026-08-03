@@ -100,20 +100,23 @@ Record the verdict in the vault at `Alef Alif/02-Theory-Research/DeepVecFont-v2/
 ## 5. Launch the three-seed baseline
 
 The highest-value thing in the whole plan, and it runs unattended. Get it going before the
-smaller tasks. Three GPUs, three seeds, identical otherwise:
+smaller tasks. Three seeds, identical otherwise, launched via `scripts/run_experiments.sh`
+(also the template for later Tier 1/2 sweeps — edit its `GPUS`/`EXPERIMENTS` arrays per batch).
+
+Check `nvidia-smi` first and set the GPU ids in that script by hand. With three free GPUs:
 
 ```bash
-for SEED in 1111 2222 3333; do
-  GPU=$(( (SEED/1111) ))        # 1, 2, 3 — adjust to whatever nvidia-smi says is free
-  CUDA_VISIBLE_DEVICES=$GPU nohup python train.py --mode train \
-    --name_exp seedfloor_${SEED}_chn --model_name main_model \
-    --language chn --max_seq_len 71 --ref_nshot 8 --batch_size 32 \
-    --seed $SEED --n_epochs 151 --freq_ckpt 25 --max_ckpt_keep 2 \
-    > nohup_seed${SEED}.out 2>&1 &
-done
+./scripts/run_experiments.sh parallel
 ```
 
-Check `nvidia-smi` first and set the GPU ids by hand rather than trusting the arithmetic above.
+With only one GPU free (the common case), set `GPUS=(0)` (or whichever id is free) in the
+script and run sequentially instead:
+
+```bash
+./scripts/run_experiments.sh sequential
+```
+
+Either way each run still gets exactly one GPU — never more than one at a time per run.
 
 `--max_ckpt_keep 2` rather than the new default of 1, because §3.3 wants one candidate scored at
 two epoch budgets to validate the 60-epoch screening assumption, which needs both checkpoints.

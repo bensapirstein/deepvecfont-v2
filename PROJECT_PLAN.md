@@ -21,7 +21,7 @@ This document covers both graded stages. It absorbs and replaces `archive/STAGE2
 | Paper's Chinese number | **0.080** |
 | Paper metric implemented | Yes, `eval_reconstruction_error.py` |
 | Missing for Stage 1 | SSIM, renderability rate, per-font CSV, quantization oracle, bin histogram |
-| Missing for Stage 2 | Everything below §3, plus the seed-noise floor |
+| Missing for Stage 2 | Everything below §3 (seed-noise floor measured: L1 spread 0.0077, see §3.2) |
 
 0.1668 sits essentially on DeepSVG's published Chinese number (0.167), so the baseline is inside the benchmark's range even though it does not reach the paper. §2.4 says how to write that up. It is not a blocker for Stage 2, which is measured against your own baseline rather than against 0.080.
 
@@ -89,6 +89,8 @@ The script now detects both layouts, accepts `--name_ckpt` to disambiguate when 
 
 **The open question is what the 0.1668 was measured on.** That figure was produced on 2026-08-01, the same day the per-checkpoint commit landed. Running the fixed script prints the detected layout on its first line, which answers it. A `flat` result means the number came from a tree with no record of which checkpoint produced it, and `test_few_shot.py` should be re-run to attribute it. See `docs/cluster-session.md` step 7.
 
+**Resolved (2026-08-03).** `python eval_reconstruction_error.py --exp_dir experiments/dvf_base_exp_chn_main_model` (no `--name_ckpt`) prints `Layout: per-checkpoint | checkpoint: 135_5440_valloss3.8618.ckpt`. Per-checkpoint means the 0.1668 figure is attributable as-is, no re-run needed — the harness bug in §2.4's candidate list is ruled out. Note the 135-checkpoint tree (the only one still on disk; 100/125 were pruned by `max_ckpt_keep`) scores L1=0.1641, mean IOU=0.2467, renderability 33/34 fonts (font 0028 failed to render, 0 svgs). That's a different checkpoint than the recorded 0.1668/0.2550 at epoch 125, not a regression — expected epoch-to-epoch noise, consistent with §2.4's "still falling val loss" point.
+
 **`val_metric` is not comparable across candidates that change the loss.** `compute_val_loss` builds it as `loss_w_l1 · img_l1 + loss_w_pt_c · vggpt + svg_total`, and the checkpoint filename embeds it. Any candidate that alters the cross-entropy itself changes what the number means, and `prune_checkpoints` will then be selecting on a different quantity. E8 and E13 are the two affected candidates; §3.2 handles them.
 
 **`.gitignore` has `experiments/` with a trailing slash**, which does not match a symlink. `COMMANDS.md` describes the entry as slash-less. Both `data` and `experiments` are symlinks on the cluster, repointed to `/data/bens/deepvecfont-v2` on 2026-08-03, so the current pattern will not ignore them. One character, worth fixing before the first `git add`. `COMMANDS.md` line 10 still describes the old `~/gpufs` target and needs the same correction.
@@ -112,6 +114,8 @@ stroke_seq[4:] = denumericalize(numericalize(stroke_seq[4:]))   # round-trip at 
 Because `stroke_seq` is a view into `char_seq` and thence into `font_seq`, that assignment writes back through the view. The function's stated job is computing auxiliary Bézier supervision points, but the round-trip mutates the sequence array itself as a side effect. Whether that mutation reached the persisted training sequences depends on what the preprocessing driver does with `font_seq` afterwards, which is a question about a dataset that is already built.
 
 If it did, the training data sits on a 64-bin grid while the head predicts over 128 bins, and half the bins are structurally unreachable. That would explain part of the gap in §2.4 on its own, and it would make E13 a waste of a Tier 2 slot. The bin histogram in §2.3 settles it in a few minutes: look for a comb pattern. Do that before committing to E13.
+
+**Measured (2026-08-03), not settled.** `scripts/bin_histogram.py` reports neither a clean comb nor a clean fill: **38.5% of mass in odd bins for Chinese, 36.0% for English** (30/32 and 32/32 odd bins occupied respectively). The script's own verdict is `PARTIAL comb ... Investigate before scoping E13`, which `docs/cluster-session.md` step 4 didn't anticipate — it only has instructions for the two clean cases. **E13's status is undecided; needs a decision before Tier 2 is scoped**, not something to resolve by picking whichever branch is more convenient.
 
 ---
 
@@ -190,6 +194,16 @@ The flow-matching coordinate head in `archive/FLOW_MATCHING_PLAN.md` was the alt
 
 **Measure the seed-noise floor before anything else.** Until today `train.py` called `setup_seed(1111)` with nothing varying it. Run the **baseline three times, seeds 1111 / 2222 / 3333**, at the screening budget. The spread of the screening metric across those three runs is your resolution limit. Any candidate whose improvement falls inside it is not a result, and reporting it as one is the most likely way to lose marks in the discussion. This costs three screening runs and it is the highest-value item in this document. Launch it on day 1, in parallel with the §2 metric work.
 
+**Measured (2026-08-03).** All three seeds trained 150 epochs, `scripts/run_experiments.sh parallel`, one GPU each. Scored with `scripts/test_experiments.sh` at the screening budget (`--n_samples 3`, all 34 fonts — see the caveat in that script about the 8-font subset not being wired up) on each seed's epoch-150 checkpoint:
+
+| Seed | Checkpoint | L1 | s-IoU |
+|---|---|---|---|
+| 1111 | `150_6040_valloss4.0166.ckpt` | 0.1734 | 0.2253 |
+| 2222 | `150_6040_valloss3.7663.ckpt` | 0.1657 | 0.2474 |
+| 3333 | `150_6040_valloss4.0798.ckpt` | 0.1658 | 0.2533 |
+
+**Seed-noise floor: L1 spread = 0.0077.** Any Stage 2 candidate's improvement over this baseline needs to clear ~0.008 in L1 to be a result rather than noise. All three fonts sets rendered fully (34/34 fonts, 1768/1768 glyphs, 0 skipped).
+
 **Screen cheap, confirm expensive.** Do not run `test_few_shot.py --n_samples 50` over all 34 test fonts for every candidate.
 
 - *Screening eval*: 8 fixed test fonts, `--n_samples 3`, at a fixed epoch. Minutes.
@@ -214,6 +228,8 @@ Time five epochs of the Chinese baseline and extrapolate. The checkpoint name `1
 | > 8 h | Tier 1 only, and drop the screening budget to 60 epochs |
 
 Relative ordering between variants usually shows up well before convergence, so a **60-epoch screening budget with a 150-epoch confirmation for finalists** is a legitimate way to double the candidate count. Validate that assumption once: take one Tier 1 candidate, score it at 60 and at 150, and check the sign of the delta agrees.
+
+**Measured (2026-08-03), from the three seed-floor runs' checkpoint timestamps, epoch 25→50 steady state (excludes one-time startup):** 22.8–24.7 s/epoch across the three seeds (seed 2222 slowest). Extrapolated to 150 epochs: **~1.0 h per run**, on an RTX 3090. That puts this in the **≤ 3 h** bucket: full matrix, everything in §3.4 to §3.6.
 
 `COMMANDS.md` shows `CUDA_VISIBLE_DEVICES` 1 and 2 in use, so at least three GPUs are in play. Run three candidates concurrently.
 
