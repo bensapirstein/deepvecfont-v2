@@ -68,12 +68,15 @@ def get_parser_main_model():
     parser.add_argument('--loss_w_aux', type=float, default=0.01, help='the weight of pts aux loss')
     parser.add_argument('--loss_w_smt', type=float, default=10., help='the weight of smooth loss')
 
-    # Stage 2 experiment flags. Declared here so runs are reproducible from opts.txt
-    # from the start; NOT yet wired into the model. Defaults reproduce current behaviour:
-    #   enc_noise_std_*  -> models/transformers.py, `x = x + torch.randn_like(x)` (sigma is implicitly 1.0)
-    #   dropout          -> MultiHeadedAttention / PositionwiseFeedForward / attn_dropout / ff_dropout (all 0.0)
-    parser.add_argument('--enc_noise_std_train', type=float, default=1.0, help='[stage 2, not yet wired] sigma of the gaussian perturbation on the sequence-encoder output during training')
-    parser.add_argument('--enc_noise_std_test', type=float, default=1.0, help='[stage 2, not yet wired] sigma of the same perturbation at val/test time; the only source of stochasticity across the n_samples candidates')
-    parser.add_argument('--dropout', type=float, default=0.0, help='[stage 2, not yet wired] dropout rate shared by the attention and feed-forward sublayers of both transformer stacks')
+    # Stage 2 experiment flags. Wired 2026-08-03. Every default reproduces the
+    # pre-change behaviour exactly, so the 3-seed noise floor stays comparable to
+    # everything launched afterwards. See PROJECT_PLAN.md 3.4.
+    #   enc_noise_std_*   -> models/transformers.py, Transformer.forward   (E9)
+    #   enc_final_norm    -> models/transformers.py, forward + att_residual (E1)
+    #   dropout           -> both transformer stacks                        (E10)
+    parser.add_argument('--enc_noise_std_train', type=float, default=1.0, help='[E9] sigma of the gaussian perturbation on the sequence-encoder output during training; 1.0 is the hardcoded original')
+    parser.add_argument('--enc_noise_std_test', type=float, default=1.0, help='[E9] sigma of the same perturbation at val/test time; the only source of stochasticity across the n_samples candidates, so 0 makes all n_samples identical')
+    parser.add_argument('--enc_final_norm', type=str2bool, default=False, help='[E1] add a terminal LayerNorm(512) to both sequence-encoder pre-norm stacks; the decoder already has one, the encoder does not')
+    parser.add_argument('--dropout', type=float, default=0.0, help='[E10] dropout rate shared by the attention and feed-forward sublayers of both transformer stacks; every one of them is hardcoded to 0.0 upstream')
 
     return parser

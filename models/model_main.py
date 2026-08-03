@@ -28,14 +28,14 @@ class ModelMain(nn.Module):
             cross_dim_head = 64,         # number of dimensions per cross attention head
             latent_dim_head = 64,        # number of dimensions per latent self attention head
             num_classes = 1000,          # output number of classes
-            attn_dropout = 0.,
-            ff_dropout = 0.,
+            attn_dropout = opts.dropout,   # E10; was hardcoded 0., and opts.dropout defaults to 0.
+            ff_dropout = opts.dropout,     # E10
             weight_tie_layers = False,   # whether to weight tie layers (optional, as indicated in the diagram)
             fourier_encode_data = True,  # whether to auto-fourier encode the data, using the input_axis given. defaults to True, but can be turned off if you are fourier encoding the data yourself
             self_per_cross_attn = 2      # number of self attention blocks per cross attention
             )
 
-        self.transformer_seqdec = Transformer_decoder()
+        self.transformer_seqdec = Transformer_decoder(dropout=opts.dropout)   # E10
 
 
     def forward(self, data, mode='train'):

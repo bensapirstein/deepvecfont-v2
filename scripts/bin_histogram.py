@@ -11,6 +11,11 @@ Answers two questions, both from PROJECT_PLAN.md:
      empty, the model is predicting over 128 bins on 64 bins' worth of information, and
      E13 (256 bins) is pointless without rebuilding the dataset.
 
+     RESOLVED 2026-08-03, independently of this script: relax_rep saves
+     sequence_relaxed.npy BEFORE calling cal_aux_bezier_pts, and never saves the mutated
+     array, so the round-trip does not reach disk. The comb test below is kept as
+     corroboration and as a report figure, not as the deciding evidence.
+
   2. (2.3) How much mass sits in the clipped boundary bins? numericalize does
      .clip(min=0, max=n-1), so coordinates outside [0, 30] are destroyed. Bin 0 is also
      the padding_idx of SVGEmbedding.arg_embed, so it maps to a frozen zero vector.
@@ -91,21 +96,38 @@ def report(args_arr, n_bins):
     print(f"  mass in odd bins  : {odd:>10}  ({100 * odd_frac:.3f}%)")
     print(f"  odd bins occupied : {odd_occupied}/{n_bins // 2}")
 
-    if odd_frac < 0.001:
+    # Thresholds. The discriminating test is odd_frac == 0 versus odd_frac > 0, not
+    # odd_frac against some fraction of 0.5. A round-trip through the n=64 grid maps
+    # every coordinate to k*30/64, which numericalize(n=128) sends to bin 2k exactly,
+    # so a comb has odd_frac identically zero up to float error. Anything above that
+    # means at least some coordinates carry sub-64-bin information.
+    #
+    # There is no meaningful middle band. relax_rep.relax_rep writes every font
+    # through the same code path, so either all persisted sequences went through the
+    # round-trip or none did; "some fonts preprocessed differently" is not reachable.
+    # An earlier version of this script called anything under 0.4 a PARTIAL comb and
+    # so flagged the real Chinese result (38.5% odd) as anomalous. It is not: font
+    # coordinates cluster on round design-grid values, which favours even bins
+    # without confining mass to them. See PROJECT_PLAN.md 1.5.
+    if odd_frac < 1e-6:
         verdict = (f"COMB. The data sits on the {n_bins // 2}-bin grid. The n=64 preprocessing "
                    f"round-trip DID reach the persisted sequences.\n"
                    f"    => The {n_bins}-bin head has no information below the {n_bins // 2}-bin "
                    f"resolution.\n"
                    f"    => DROP E13. Adding bins cannot help without rebuilding the dataset.\n"
                    f"    => Use the {n_bins // 2}-bin row of the 2.3 oracle table.")
-    elif odd_frac < 0.4:
-        verdict = (f"PARTIAL comb ({100 * odd_frac:.1f}% odd). Unexpected. Some fonts may have been "
-                   f"preprocessed differently.\n    => Investigate before scoping E13.")
+    elif odd_occupied < n_bins // 4:
+        verdict = (f"NEAR-COMB ({100 * odd_frac:.1f}% odd mass, but only {odd_occupied}/"
+                   f"{n_bins // 2} odd bins occupied). The mass is present but concentrated in "
+                   f"few odd bins, which is not what either clean case looks like.\n"
+                   f"    => Inspect the histogram directly before scoping E13.")
     else:
-        verdict = (f"FILLED. Odd and even bins are both populated, so the data was NOT round-tripped "
-                   f"through the 64-bin grid.\n"
+        verdict = (f"FILLED ({100 * odd_frac:.1f}% odd mass across {odd_occupied}/{n_bins // 2} "
+                   f"odd bins). The data was NOT round-tripped through the 64-bin grid.\n"
                    f"    => The model genuinely operates at {n_bins} bins.\n"
-                   f"    => E13 stays on the list, gated only on the oracle result.")
+                   f"    => E13 stays on the list, gated only on the oracle result.\n"
+                   f"    => Odd mass below 50% is expected: font coordinates cluster on round\n"
+                   f"       design-grid values, which favours even bins. Only odd_frac == 0 is a comb.")
     print(f"\n  VERDICT: {verdict}")
 
     top = np.argsort(hist)[::-1][:8]

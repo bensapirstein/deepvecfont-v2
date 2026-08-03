@@ -31,13 +31,27 @@ GPUS=(1 2 3)
 
 # One entry per experiment: "name_exp  <extra args appended to COMMON_ARGS>".
 # This is the loop-over-params spot — add/edit lines here for a sweep.
+# --- Tier 1, E7: loss_w_aux sweep (PROJECT_PLAN.md §3.4) ---------------------
+# Eq. 11 weights L_bezier at 1.0; options.py defaults it to 0.01, a factor of
+# 100 below. No code change needed, the flag already exists.
+#
+# The 0.01 point of this sweep is already measured: it IS seedfloor_1111_chn,
+# same seed, same COMMON_ARGS, default loss_w_aux. Do not re-run it.
+# One factor at a time, so every run below holds seed 1111.
 EXPERIMENTS=(
-  "seedfloor_1111_chn --seed 1111"
-  "seedfloor_2222_chn --seed 2222"
-  "seedfloor_3333_chn --seed 3333"
+  "e7_aux01_chn --seed 1111 --loss_w_aux 0.1"
+  "e7_aux03_chn --seed 1111 --loss_w_aux 0.3"
+  "e7_aux10_chn --seed 1111 --loss_w_aux 1.0"
 )
 
-# Args shared by every experiment in this batch.
+# Previous batch, kept for provenance (3-seed noise floor, run 2026-08-03,
+# L1 spread 0.0077 — see PROJECT_PLAN.md §3.2):
+#   "seedfloor_1111_chn --seed 1111"
+#   "seedfloor_2222_chn --seed 2222"
+#   "seedfloor_3333_chn --seed 3333"
+
+# Args shared by every experiment in this batch. Identical to the seed-floor
+# batch, which is what makes e7_* comparable to seedfloor_1111_chn.
 COMMON_ARGS="--mode train --model_name main_model --language chn --max_seq_len 71 --ref_nshot 8 --batch_size 32 --n_epochs 151 --freq_ckpt 25 --max_ckpt_keep 2"
 
 if [[ "$MODE" == "parallel" && ${#GPUS[@]} -lt ${#EXPERIMENTS[@]} ]]; then

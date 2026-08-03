@@ -183,17 +183,22 @@ class PositionwiseFeedForward(nn.Module):
         return self.w_2(F.relu(self.dropout(self.w_1(x))))
 
 class Transformer_decoder(nn.Module):
-    def __init__(self):
+    def __init__(self, dropout=None):
         super().__init__()
         self.SVG_embedding = SVGEmbedding()
         self.command_fcn = nn.Linear(512, 4)
         self.args_fcn = nn.Linear(512, 8 * 128)
         c = copy.deepcopy
-        attn = MultiHeadedAttention(h=8, d_model=512, dropout=0.0)
-        ff = PositionwiseFeedForward(d_model=512, d_ff=1024, dropout=0.0)
-        self.decoder_layers = clones(DecoderLayer(512, c(attn), c(attn),c(ff), dropout=0.0), 6)
+        # E10. Every dropout in this stack was hardcoded to 0.0 upstream. Passed in by
+        # ModelMain from the real opts rather than read off the module-level `opts`
+        # global, so the encoder and decoder cannot silently disagree. Defaults to
+        # 0.0, so the baseline is unchanged.
+        p_drop = opts.dropout if dropout is None else dropout
+        attn = MultiHeadedAttention(h=8, d_model=512, dropout=p_drop)
+        ff = PositionwiseFeedForward(d_model=512, d_ff=1024, dropout=p_drop)
+        self.decoder_layers = clones(DecoderLayer(512, c(attn), c(attn),c(ff), dropout=p_drop), 6)
         self.decoder_norm = nn.LayerNorm(512)
-        self.decoder_layers_parallel = clones(DecoderLayer(512, c(attn), c(attn), c(ff), dropout=0.0), 1)
+        self.decoder_layers_parallel = clones(DecoderLayer(512, c(attn), c(attn), c(ff), dropout=p_drop), 1)
         self.decoder_norm_parallel = nn.LayerNorm(512)
         self.cls_embedding = nn.Embedding(52,512)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, 512))
@@ -428,6 +433,15 @@ class Transformer(nn.Module):
         self.SVG_embedding = SVGEmbedding()
         self.cls_token = nn.Parameter(torch.zeros(1, 1, 512))
 
+        # E1. Constructed only when the flag is on, so the baseline checkpoint's
+        # state_dict keys are unchanged and old checkpoints still load strictly.
+        if opts.enc_final_norm:
+            self.enc_final_norm = nn.LayerNorm(latent_dim)
+            self.enc_final_norm_cnnsvg = nn.LayerNorm(latent_dim)
+        else:
+            self.enc_final_norm = None
+            self.enc_final_norm_cnnsvg = None
+
     def forward(self, data, seq, ref_cls_onehot=None, mask=None, return_embeddings=True):
 
         b, *axis, _, device, dtype = *data.shape, data.device, data.dtype
@@ -447,16 +461,30 @@ class Transformer(nn.Module):
                 x = x_ + x 
                 self_atten.append(atten)
                 x = self_ff(x) + x
-        x = x + torch.randn_like(x) # add a perturbation
+        # E1: terminal LayerNorm on a pre-norm stack. Without it the residual stream
+        # leaves the encoder unnormalized and its scale grows with depth, which is also
+        # what makes the E9 sigma below an arbitrary quantity rather than a meaningful
+        # one. The decoder already has this, as decoder_norm / decoder_norm_parallel.
+        # Off by default so the baseline stays bit-reproducible.
+        if self.enc_final_norm is not None:
+            x = self.enc_final_norm(x)
+        # E9: the perturbation was hardcoded at sigma=1.0 and never tuned. The noise is
+        # always drawn, even at sigma=0, so that runs across the sweep stay aligned on
+        # the same RNG stream and differ in the noise scale alone.
+        sigma = opts.enc_noise_std_train if self.training else opts.enc_noise_std_test
+        x = x + sigma * torch.randn_like(x)
         return x, self_atten
-    
+
     def att_residual(self, x, mask=None):
 
         for cross_attn, cross_ff, self_attns in self.layers_cnnsvg:
-            for self_attn, self_ff in self_attns: 
-                x_, atten = self_attn(x)  
-                x = x_ + x 
+            for self_attn, self_ff in self_attns:
+                x_, atten = self_attn(x)
+                x = x_ + x
                 x = self_ff(x) + x
+        # E1, second pre-norm stack. Same omission, same fix.
+        if self.enc_final_norm_cnnsvg is not None:
+            x = self.enc_final_norm_cnnsvg(x)
         return x
 
         

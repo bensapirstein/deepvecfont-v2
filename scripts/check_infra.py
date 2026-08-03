@@ -9,6 +9,7 @@ can be checked without a training run:
   2. str2bool    -- `--wandb False` actually disables the flag             [live]
   3. train.py    -- imports, seeding and wandb call sites are wired right  [static, AST]
   4. wandb       -- init / log / finish round-trip in offline mode         [live]
+  5. models/     -- the E9 / E1 / E10 flags actually reach the model       [static, source]
 
 What this CANNOT check, and what the cluster dry run is for: that setup_seed actually
 makes a run reproducible, that the mirrored scalars carry sane values, and that a run
@@ -54,12 +55,14 @@ def check_options():
         ('enc_noise_std_train',  float, 1.0),
         ('enc_noise_std_test',   float, 1.0),
         ('dropout',              float, 0.0),
+        ('enc_final_norm',       None,  False),   # str2bool, checked by identity below
     ]
     for dest, typ, default in expected:
         if not check(f"--{dest} exists", dest in actions):
             continue
-        check(f"--{dest} type is {typ.__name__}", actions[dest].type is typ,
-              f"got {actions[dest].type}")
+        if typ is not None:
+            check(f"--{dest} type is {typ.__name__}", actions[dest].type is typ,
+                  f"got {actions[dest].type}")
         check(f"--{dest} default is {default!r}", defaults[dest] == default,
               f"got {defaults[dest]!r}")
 
@@ -67,10 +70,16 @@ def check_options():
     check("--wandb default is True", defaults.get('wandb') is True, f"got {defaults.get('wandb')!r}")
 
     # The stage-2 flags must be inert: their defaults have to reproduce current behaviour.
+    # This is what keeps the 3-seed noise floor comparable to every run launched after
+    # the wiring landed, so a failure here invalidates the whole Stage 2 comparison.
     check("enc_noise_std defaults reproduce the hardcoded sigma=1.0",
           defaults['enc_noise_std_train'] == 1.0 and defaults['enc_noise_std_test'] == 1.0)
     check("dropout default reproduces the all-zero dropout in models/",
           defaults['dropout'] == 0.0)
+    check("enc_final_norm defaults off, so the encoder is unchanged",
+          defaults['enc_final_norm'] is False, f"got {defaults['enc_final_norm']!r}")
+    check("--enc_final_norm parses as str2bool, not as a truthy string",
+          parser.parse_args(['--enc_final_norm', 'False']).enc_final_norm is False)
 
     # Regression guard: the flags the training commands in COMMANDS.md rely on.
     for dest in ('language', 'max_seq_len', 'ref_nshot', 'name_exp', 'freq_ckpt', 'n_epochs'):
@@ -240,12 +249,77 @@ def check_wandb_roundtrip():
         print("  [note] the final step commits only at wandb.finish(); a hard-killed run drops it")
 
 
+# ------------------------------------------------- 5. stage 2 wiring (E9, E1, E10)
+
+def check_stage2_wiring():
+    """Static check that the Tier 1 flags actually reach the model.
+
+    A declared-but-unread flag is the specific failure this guards against: the run
+    would train happily, log the flag into opts.txt and wandb, and produce a number
+    identical to the baseline. That is worse than a crash, because it looks like a
+    result. Wired 2026-08-03; see PROJECT_PLAN.md 3.4.
+    """
+    print("\n5. stage 2 wiring: E9 / E1 / E10 [static, source]")
+
+    tf_path = os.path.join(REPO, 'models', 'transformers.py')
+    mm_path = os.path.join(REPO, 'models', 'model_main.py')
+    with open(tf_path) as fh:
+        tf_src = fh.read()
+    with open(mm_path) as fh:
+        mm_src = fh.read()
+
+    # E9. The old line was an unconditional `x = x + torch.randn_like(x)`.
+    check("E9: the hardcoded unscaled perturbation is gone",
+          'x = x + torch.randn_like(x)' not in tf_src,
+          "models/transformers.py still adds the perturbation without a sigma")
+    check("E9: sigma is selected by self.training",
+          'opts.enc_noise_std_train if self.training else opts.enc_noise_std_test' in tf_src)
+    check("E9: sigma scales the noise",
+          'sigma * torch.randn_like(x)' in tf_src)
+    # train.py wraps validation in model_main.eval() and restores .train() after, and
+    # test_few_shot.py calls .eval(), so self.training is the right discriminator.
+    with open(os.path.join(REPO, 'train.py')) as fh:
+        train_src = fh.read()
+    check("E9: train.py puts the model in eval() around validation",
+          '.eval()' in train_src and '.train()' in train_src,
+          "without eval() the test sigma would never apply at validation")
+
+    # E1.
+    check("E1: both encoder stacks construct a terminal norm",
+          'self.enc_final_norm = nn.LayerNorm' in tf_src
+          and 'self.enc_final_norm_cnnsvg = nn.LayerNorm' in tf_src)
+    check("E1: forward applies it", 'if self.enc_final_norm is not None:' in tf_src)
+    check("E1: att_residual applies it too",
+          'if self.enc_final_norm_cnnsvg is not None:' in tf_src)
+    check("E1: off by default leaves the state_dict keys unchanged",
+          'self.enc_final_norm = None' in tf_src,
+          "the modules must not be constructed when the flag is off, or old "
+          "checkpoints stop loading strictly")
+
+    # E10. Every one of these was a hardcoded 0.0 upstream.
+    check("E10: decoder sublayers no longer hardcode dropout=0.0",
+          'MultiHeadedAttention(h=8, d_model=512, dropout=0.0)' not in tf_src
+          and 'PositionwiseFeedForward(d_model=512, d_ff=1024, dropout=0.0)' not in tf_src)
+    check("E10: the decoder takes dropout as a parameter, not off the module global",
+          'def __init__(self, dropout=None):' in tf_src)
+    check("E10: ModelMain passes the real opts into the decoder",
+          'Transformer_decoder(dropout=opts.dropout)' in mm_src)
+    check("E10: ModelMain passes the real opts into the encoder",
+          'attn_dropout = opts.dropout' in mm_src and 'ff_dropout = opts.dropout' in mm_src,
+          "models/model_main.py still hardcodes attn_dropout / ff_dropout to 0.")
+
+    # The whole point of the defaults.
+    check("E10: no hardcoded dropout=0. survives in the encoder call site",
+          'attn_dropout = 0.,' not in mm_src)
+
+
 def main():
     print("Pre-flight infrastructure checks -- " + REPO)
     check_options()
     check_str2bool()
     check_train_source()
     check_wandb_roundtrip()
+    check_stage2_wiring()
 
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed")
     if FAILED:

@@ -115,7 +115,23 @@ Because `stroke_seq` is a view into `char_seq` and thence into `font_seq`, that 
 
 If it did, the training data sits on a 64-bin grid while the head predicts over 128 bins, and half the bins are structurally unreachable. That would explain part of the gap in §2.4 on its own, and it would make E13 a waste of a Tier 2 slot. The bin histogram in §2.3 settles it in a few minutes: look for a comb pattern. Do that before committing to E13.
 
-**Measured (2026-08-03), not settled.** `scripts/bin_histogram.py` reports neither a clean comb nor a clean fill: **38.5% of mass in odd bins for Chinese, 36.0% for English** (30/32 and 32/32 odd bins occupied respectively). The script's own verdict is `PARTIAL comb ... Investigate before scoping E13`, which `docs/cluster-session.md` step 4 didn't anticipate — it only has instructions for the two clean cases. **E13's status is undecided; needs a decision before Tier 2 is scoped**, not something to resolve by picking whichever branch is more convenient.
+**Measured (2026-08-03).** `scripts/bin_histogram.py` reports neither a clean comb nor a clean fill: **38.5% of mass in odd bins for Chinese, 36.0% for English** (30/32 and 32/32 odd bins occupied respectively). The script's own verdict was `PARTIAL comb ... Investigate before scoping E13`, which `docs/cluster-session.md` step 4 didn't anticipate — it only has instructions for the two clean cases.
+
+**Resolved (2026-08-03), by reading the preprocessing driver rather than the histogram.** The mutation never reaches disk. In `relax_rep.relax_rep.process` the two statements are in this order:
+
+```python
+np.save(os.path.join(font_dir, 'sequence_relaxed.npy'), ret.reshape(opts.n_chars, -1))
+pts_aux = cal_aux_bezier_pts(ret, opts)      # mutates `ret` in place, afterwards
+```
+
+`sequence_relaxed.npy` is written **before** `cal_aux_bezier_pts` is called, and `ret` is never saved again. The in-place round-trip through the n=64 grid therefore corrupts only the in-memory array that `cal_aux_bezier_pts` is about to consume for its own auxiliary points, and `dataloader.py:37` loads `sequence_relaxed.npy`, the untouched file. `cal_aux_bezier_pts` has no other caller in the repo.
+
+Two consequences:
+
+1. **The training sequences are at full float resolution**, not on a 64-bin grid. The 128-bin head is modelling data that genuinely carries information below 64-bin resolution, so E13's first gate passes. It remains gated on the oracle: doubling the bins is only worth a Tier 2 slot if the §2.3 oracle floor turns out to be a material fraction of the gap, and §1.2 caps how much any sub-pixel change can show up in a rasterized L1 at 64×64.
+2. **A "partial comb" was never a reachable outcome.** Either every persisted sequence went through the n=64 round-trip or none did, because one code path writes all of them. The 38.5% figure is not evidence of partial corruption; it is the natural shape of font coordinate distributions, which cluster on round design-grid values and so favour even bins without being confined to them. `bin_histogram.py`'s `odd_frac < 0.4` threshold is what manufactured the PARTIAL verdict, and it is arbitrary. The discriminating test is `odd_frac ≈ 0` versus `odd_frac > 0`, and 30/32 odd bins occupied answers it.
+
+The histogram still earns its place in the report as the figure showing the mass at bins 0 and 127, which is the `.clip(min=0, max=n-1)` and `padding_idx=0` point in §2.3. It just does not decide E13.
 
 ---
 
@@ -297,7 +313,9 @@ Touch points: `numericalize(n=128)` and `denumericalize(n=128)` in `models/trans
 
 While there, drop `padding_idx=0` from `arg_embed`, or shift arguments by +1. Bin 0 is a legitimate coordinate and currently gets a frozen zero embedding.
 
-**Gated twice, and the gate is cheap.** Run this only if the §2.3 bin histogram shows a filled distribution rather than a comb, and only if the oracle then shows the quantization floor is a material fraction of your gap. Per §1.5, there is a second quantization grid at n=64 in the preprocessing path, and if the training sequences went through it then adding bins to the head adds resolution the data does not have. Both checks are minutes of work and they run on day 1. Screen on the rendered metric.
+**Gated twice. The first gate is cleared (2026-08-03).** The n=64 preprocessing grid never reached the persisted sequences: `relax_rep` saves `sequence_relaxed.npy` before `cal_aux_bezier_pts` mutates its argument, and the dataloader reads that file. See §1.5. The training data is at full resolution, so adding bins to the head adds resolution the data actually has.
+
+**The second gate is the oracle**, still unrun: E13 is worth a Tier 2 slot only if the §2.3 quantization floor turns out to be a material fraction of the gap. Temper the expectation with §1.2 — the metric is a rasterized L1 at 64×64 and is largely blind to sub-pixel coordinate accuracy, which is exactly what halving the rounding error buys. Screen on the rendered metric.
 
 **E3 — Self-refinement decoder, 1 layer → 2.** *Maps to: add residual or attention layers, change the decoder.*
 
