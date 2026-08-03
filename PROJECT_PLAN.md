@@ -194,13 +194,13 @@ The flow-matching coordinate head in `archive/FLOW_MATCHING_PLAN.md` was the alt
 
 **Measure the seed-noise floor before anything else.** Until today `train.py` called `setup_seed(1111)` with nothing varying it. Run the **baseline three times, seeds 1111 / 2222 / 3333**, at the screening budget. The spread of the screening metric across those three runs is your resolution limit. Any candidate whose improvement falls inside it is not a result, and reporting it as one is the most likely way to lose marks in the discussion. This costs three screening runs and it is the highest-value item in this document. Launch it on day 1, in parallel with the §2 metric work.
 
-**Measured (2026-08-03).** All three seeds trained 150 epochs, `scripts/run_experiments.sh parallel`, one GPU each. Scored with `scripts/test_experiments.sh` at the screening budget (`--n_samples 3`, all 34 fonts — see the caveat in that script about the 8-font subset not being wired up) on each seed's epoch-150 checkpoint:
+**Measured (2026-08-03).** All three seeds trained 150 epochs, `scripts/run_experiments.sh parallel`, one GPU each. Scored with `scripts/test_experiments.sh` at the screening budget (`--n_samples 3`, all 34 fonts — see the caveat in that script about the 8-font subset not being wired up), on each seed's **best-val-loss checkpoint** (`prune_checkpoints` in `train.py` keeps that one specifically, alongside the latest — for seed 3333 that's epoch 100, not the final epoch 150):
 
 | Seed | Checkpoint | L1 | s-IoU |
 |---|---|---|---|
 | 1111 | `150_6040_valloss4.0166.ckpt` | 0.1734 | 0.2253 |
 | 2222 | `150_6040_valloss3.7663.ckpt` | 0.1657 | 0.2474 |
-| 3333 | `150_6040_valloss4.0798.ckpt` | 0.1658 | 0.2533 |
+| 3333 | `100_4040_valloss4.0104.ckpt` | 0.1694 | 0.1913 |
 
 **Seed-noise floor: L1 spread = 0.0077.** Any Stage 2 candidate's improvement over this baseline needs to clear ~0.008 in L1 to be a result rather than noise. All three fonts sets rendered fully (34/34 fonts, 1768/1768 glyphs, 0 skipped).
 

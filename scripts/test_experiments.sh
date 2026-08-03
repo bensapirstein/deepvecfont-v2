@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Companion to run_experiments.sh, for the test/eval half of a batch: runs
 # test_few_shot.py then eval_reconstruction_error.py for each experiment,
-# auto-picking each one's highest-epoch checkpoint. Same sequential/parallel
-# switch, one GPU per run.
+# auto-picking each one's best-val-loss checkpoint (the score is embedded in
+# the filename precisely so it can be selected on -- see prune_checkpoints()
+# in train.py, which keeps the lowest-val-loss checkpoints for the same
+# reason). Same sequential/parallel switch, one GPU per run.
 #
 # Today's use: score the three seed-floor runs at the screening budget
 # (PROJECT_PLAN.md §3.2) to get the seed-noise floor. Edit EXPERIMENTS for
@@ -29,7 +31,7 @@ fi
 # GPU ids to use, in order. Check `nvidia-smi` and set these by hand.
 GPUS=(1 2 3)
 
-# One entry per experiment: the name_exp to test (its highest-epoch
+# One entry per experiment: the name_exp to test (its best-val-loss
 # checkpoint is picked automatically from experiments/<name>_main_model/checkpoints/).
 EXPERIMENTS=(
   "seedfloor_1111_chn"
@@ -46,13 +48,20 @@ if [[ "$MODE" == "parallel" && ${#GPUS[@]} -lt ${#EXPERIMENTS[@]} ]]; then
   exit 1
 fi
 
-latest_ckpt() {
-  ls "experiments/$1_main_model/checkpoints" | sort -t_ -k1,1nr | head -1
+best_ckpt() {
+  # Filenames are <epoch>_<step>_valloss<x>.ckpt (see CKPT_RE in train.py).
+  # Sort on the embedded val loss, ascending -- lowest wins.
+  for f in "experiments/$1_main_model/checkpoints"/*.ckpt; do
+    f="$(basename "$f")"
+    val="${f#*valloss}"
+    val="${val%.ckpt}"
+    echo "$val $f"
+  done | sort -k1,1n | head -1 | cut -d' ' -f2
 }
 
 declare -A CKPTS
 for name in "${EXPERIMENTS[@]}"; do
-  CKPTS["$name"]="$(latest_ckpt "$name")"
+  CKPTS["$name"]="$(best_ckpt "$name")"
 done
 
 pids=()
