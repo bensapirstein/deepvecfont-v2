@@ -46,21 +46,39 @@ GPUS=(1 2 3)
 # a loss weight only) and E9/E10 (enc_noise_std_train, dropout -- neither
 # adds parameters, and eval() already disables dropout's effect) do not.
 # Matches scripts/run_experiments.sh's EXPERIMENTS for the 2026-08-03 night re-run.
+#
+# Tier 2, 2026-08-04. Which flags have to be repeated here, and why:
+#   --n_args_bins      YES. Resizes arg_embed and args_fcn, and denumericalize
+#                      reads it at decode time. Omitting it is a load crash.
+#   --n_layers_refine  YES. Adds DecoderLayer modules, so state_dict keys change.
+#   --arg_embed_pad_idx  YES, though only for the record: padding_idx changes no
+#                      shape and has no effect without gradients, so test would
+#                      run correctly without it. Passed so opts.txt is honest.
+#   --args_label_smooth_sigma  no. Loss-only, never read outside Transformer.loss.
+#   --lr_schedule      no. Optimizer-only.
 EXPERIMENTS=(
+  # Re-screened, not re-trained. The recorded 0.1724 came from a different
+  # screening session, and test_few_shot.py's best-of-n_samples decoding is
+  # unseeded, so the baseline moves ~0.001-0.003 between sessions (§3.2). Scoring
+  # it in the same batch as the candidates removes that as a confound, and it
+  # doubles as one more draw for scripts/eval_noise.sh.
   "seedfloor_1111_chn"
-  "seedfloor_2222_chn"
-  "seedfloor_3333_chn"
-  "e7_aux01_chn"
-  "e7_aux03_chn"
-  "e7_aux10_chn"
-  "e9_sigma000_chn"
-  "e9_sigma010_chn"
-  "e9_sigma025_chn"
-  "e9_sigma050_chn"
-  "e10_drop01_chn"
-  "e10_drop02_chn"
-  "e1_norm_chn --enc_final_norm True"
+  "e8_ls05_chn"
+  "e8_ls10_chn"
+  "e8_ls20_chn"
+  "e13_bins256_chn --n_args_bins 256"
+  "e13_nopad_chn --arg_embed_pad_idx False"
+  "e3_refine2_chn --n_layers_refine 2"
+  "e3_refine3_chn --n_layers_refine 3"
+  "e14_wucos_chn"
 )
+
+# Tier 1 batch, 2026-08-03 night, kept for provenance:
+#   "seedfloor_1111_chn"  "seedfloor_2222_chn"  "seedfloor_3333_chn"
+#   "e7_aux01_chn"  "e7_aux03_chn"  "e7_aux10_chn"
+#   "e9_sigma000_chn"  "e9_sigma010_chn"  "e9_sigma025_chn"  "e9_sigma050_chn"
+#   "e10_drop01_chn"  "e10_drop02_chn"
+#   "e1_norm_chn --enc_final_norm True"
 
 # Screening budget per PROJECT_PLAN.md §3.2: n_samples 3, not the n_samples 50
 # confirmation eval.
@@ -144,13 +162,20 @@ for name in "${NAMES[@]}"; do
 done
 
 # PROJECT_PLAN.md / docs/tier1-launch.md §5 report format: per run, L1 minus
-# the baseline's L1, and whether that clears the 0.008 noise-floor bar. Only
+# the baseline's L1, and whether that clears the noise-floor bar. Only
 # meaningful once BASELINE has an L1 -- set to the empty string to skip.
 BASELINE="seedfloor_1111_chn"
 
+# The bar a candidate has to clear to be a result rather than seed variance.
+# Was 0.008 for Tier 1's first pass; re-measured to 0.0093 on 2026-08-04 after the
+# val_metric fix changed which checkpoint seed 3333 selects (PROJECT_PLAN.md §3.2).
+# scripts/eval_noise.sh is measuring how much of this is decode noise rather than
+# seed noise; lower it only when that lands, and say so in the plan when you do.
+NOISE_FLOOR=0.0093
+
 echo
 echo "=== Per-run summary (docs/tier1-launch.md §5) ==="
-printf "%-20s %-16s %-8s %-8s %-24s %-9s %s\n" "name" "checkpoint" "L1" "s-IoU" "renderability" "delta" "clears_0.008"
+printf "%-20s %-16s %-8s %-8s %-24s %-9s %s\n" "name" "checkpoint" "L1" "s-IoU" "renderability" "delta" "clears_${NOISE_FLOOR}"
 baseline_l1="${L1S[$BASELINE]:-}"
 for name in "${NAMES[@]}"; do
   l1="${L1S[$name]:-NA}"
@@ -160,13 +185,13 @@ for name in "${NAMES[@]}"; do
     delta="--"; clears="baseline"
   elif [[ -n "$baseline_l1" && "$l1" != "NA" ]]; then
     delta="$(python3 -c "print(f'{$l1 - $baseline_l1:+.4f}')")"
-    clears="$(python3 -c "print('yes' if ($baseline_l1 - $l1) > 0.008 else 'no')")"
+    clears="$(python3 -c "print('yes' if ($baseline_l1 - $l1) > $NOISE_FLOOR else 'no')")"
   else
     delta="n/a"; clears="n/a"
   fi
   printf "%-20s %-16s %-8s %-8s %-24s %-9s %s\n" "$name" "${CKPTS[$name]}" "$l1" "$iou" "$render" "$delta" "$clears"
 done
-echo "delta = candidate L1 - $BASELINE L1 (negative = better). clears_0.008: candidate beats baseline by more than 0.008 L1."
+echo "delta = candidate L1 - $BASELINE L1 (negative = better). clears: candidate beats baseline by more than $NOISE_FLOOR L1."
 
 seed_names=(seedfloor_1111_chn seedfloor_2222_chn seedfloor_3333_chn)
 have_all_seeds=1

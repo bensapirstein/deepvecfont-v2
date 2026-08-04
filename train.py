@@ -1,3 +1,4 @@
+import math
 import os
 import random
 import numpy as np
@@ -99,7 +100,31 @@ def train_main_model(opts):
         start_epoch = checkpoint['n_epoch'] + 1
         print(f"Resumed from {ckpt_path}, starting at epoch {start_epoch}")
 
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.997)
+    # E14. The original schedule is ExponentialLR(gamma=0.997) stepped per epoch, which
+    # over 150 epochs multiplies the lr by 0.997^150 = 0.64 -- effectively constant at the
+    # budget the sweep trains to -- with no warmup at all on a 6-layer transformer decoder
+    # running Adam at 2e-4. warmup_cosine replaces it with linear warmup then cosine decay
+    # to the epoch budget, stepped per optimizer step so the warmup is expressed in the
+    # units it is normally specified in. 'exp' is the default and reproduces the original.
+    sched_per_step = opts.lr_schedule == 'warmup_cosine'
+    if sched_per_step:
+        warmup = max(1, opts.lr_warmup_steps)
+        total_steps = max(warmup + 1, opts.n_epochs * len(train_loader))
+
+        def lr_lambda(step):
+            if step < warmup:
+                return (step + 1) / warmup
+            progress = min(1.0, (step - warmup) / (total_steps - warmup))
+            cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+            return opts.lr_min_factor + (1.0 - opts.lr_min_factor) * cosine
+
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+        print(f"[E14] warmup_cosine: {warmup} warmup steps, {total_steps} total, "
+              f"floor {opts.lr_min_factor} x lr")
+        # NOTE: --resume does not restore the LambdaLR step counter, so resuming a
+        # warmup_cosine run restarts the schedule. Nothing in the sweep resumes.
+    else:
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.997)
 
     if opts.tboard:
         writer = SummaryWriter(dir_log)
@@ -125,7 +150,9 @@ def train_main_model(opts):
             optimizer.zero_grad()
             loss.backward()       
             optimizer.step()
-            batches_done = epoch * len(train_loader) + idx + 1 
+            if sched_per_step:                # E14
+                scheduler.step()
+            batches_done = epoch * len(train_loader) + idx + 1
             message = (
                 f"Epoch: {epoch}/{opts.n_epochs}, Batch: {idx}/{len(train_loader)}, "
                 f"Loss: {loss.item():.6f}, "
@@ -208,7 +235,8 @@ def train_main_model(opts):
                 print(val_msg)
         
 
-        scheduler.step()
+        if not sched_per_step:                # E14: 'exp' keeps its per-epoch cadence
+            scheduler.step()
 
         if epoch % opts.freq_ckpt == 0:
             loss_val, last_val_metric = compute_val_loss(model_main, val_loader, opts)

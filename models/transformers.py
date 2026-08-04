@@ -150,7 +150,18 @@ class SVGEmbedding(nn.Module):
     def __init__(self):
         super().__init__()
         self.command_embed = nn.Embedding(4, 512)
-        self.arg_embed = nn.Embedding(128, 128,padding_idx=0)
+        # E13. Two different 128s here: the first is the vocabulary (one entry per
+        # quantization bin, --n_args_bins) and the second is the embedding width, which
+        # is unrelated and stays fixed -- embed_fcn below consumes 128 * 8 of it.
+        #
+        # padding_idx=0 does less than it looks like it does. It zeroes row 0 at
+        # construction, but _init_embeddings then runs kaiming_normal_ over the whole
+        # weight and overwrites that zero, so row 0 ends up frozen at a *random* vector
+        # rather than at zero -- padding_idx only survives as a zero gradient. Either
+        # way bin 0 is a legitimate coordinate whose embedding never trains, which is
+        # what --arg_embed_pad_idx False turns off.
+        self.arg_embed = nn.Embedding(opts.n_args_bins, 128,
+                                      padding_idx=0 if opts.arg_embed_pad_idx else None)
         self.embed_fcn = nn.Linear(128 * 8, 512)
         self.pos_encoding = PositionalEncoding(d_model=opts.hidden_size, max_len=opts.max_seq_len + 1)
         self._init_embeddings()
@@ -187,7 +198,7 @@ class Transformer_decoder(nn.Module):
         super().__init__()
         self.SVG_embedding = SVGEmbedding()
         self.command_fcn = nn.Linear(512, 4)
-        self.args_fcn = nn.Linear(512, 8 * 128)
+        self.args_fcn = nn.Linear(512, 8 * opts.n_args_bins)   # E13
         c = copy.deepcopy
         # E10. Every dropout in this stack was hardcoded to 0.0 upstream. Passed in by
         # ModelMain from the real opts rather than read off the module-level `opts`
@@ -198,7 +209,11 @@ class Transformer_decoder(nn.Module):
         ff = PositionwiseFeedForward(d_model=512, d_ff=1024, dropout=p_drop)
         self.decoder_layers = clones(DecoderLayer(512, c(attn), c(attn),c(ff), dropout=p_drop), 6)
         self.decoder_norm = nn.LayerNorm(512)
-        self.decoder_layers_parallel = clones(DecoderLayer(512, c(attn), c(attn), c(ff), dropout=p_drop), 1)
+        # E3. Sec. 3.3 calls the self-refinement module "a 2-layer Transformer decoder";
+        # the released code clones exactly 1. This is the decoder whose output actually
+        # gets scored (test_few_shot.py selects on sampled_svg_2), so its depth is not a
+        # cosmetic choice. Defaults to 1, the released behaviour.
+        self.decoder_layers_parallel = clones(DecoderLayer(512, c(attn), c(attn), c(ff), dropout=p_drop), opts.n_layers_refine)
         self.decoder_norm_parallel = nn.LayerNorm(512)
         self.cls_embedding = nn.Embedding(52,512)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, 512))
@@ -218,8 +233,8 @@ class Transformer_decoder(nn.Module):
         out = self.decoder_norm(x)
         N, S, _ = out.shape
         cmd_logits = self.command_fcn(out)
-        args_logits = self.args_fcn(out) # shape: bs, max_len, 8, 256
-        args_logits = args_logits.reshape(N, S, 8, 128)
+        args_logits = self.args_fcn(out) # shape: bs, max_len, 8 * n_args_bins
+        args_logits = args_logits.reshape(N, S, 8, opts.n_args_bins)   # E13
         return cmd_logits,args_logits,attn
     
     def parallel_decoder(self, cmd_logits, args_logits, memory, trg_char):
@@ -270,7 +285,7 @@ class Transformer_decoder(nn.Module):
         N, S, _ = out.shape
         cmd_logits = self.command_fcn(out)
         args_logits = self.args_fcn(out)
-        args_logits = args_logits.reshape(N, S, 8, 128)
+        args_logits = args_logits.reshape(N, S, 8, opts.n_args_bins)   # E13
 
         return cmd_logits, args_logits
 
@@ -506,12 +521,12 @@ class Transformer(nn.Module):
         seqlen_mask = util_funcs.sequence_mask(trg_seqlen, opts.max_seq_len).unsqueeze(-1)
         seqlen_mask2 = seqlen_mask.repeat(1,1,4)# NOTE b,501,4
         seqlen_mask4 = seqlen_mask.repeat(1,1,8)
-        seqlen_mask3 = seqlen_mask.unsqueeze(-1).repeat(1,1,8,128)
-        
-        
+        seqlen_mask3 = seqlen_mask.unsqueeze(-1).repeat(1,1,8,opts.n_args_bins)   # E13
+
+
         tgt_commands_onehot = F.one_hot(tgt_commands, 4)
-        tgt_args_onehot = F.one_hot(tgt_args, 128)
-       
+        tgt_args_onehot = build_args_target(tgt_args, opts.n_args_bins, opts.args_label_smooth_sigma)   # E8/E13
+
         args_mask = torch.matmul(tgt_commands_onehot.float(),cmd_args_mask).squeeze()
 
 
@@ -621,14 +636,43 @@ def subsequent_mask(size):
     subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
     return torch.from_numpy(subsequent_mask) == 0
 
-def numericalize(cmd, n=128):
+def build_args_target(tgt_args, n_bins, smooth_sigma):
+    """Target distribution over coordinate bins for the argument cross-entropy.
+
+    E8. The released target is a plain one-hot over the 128 bins, permutation-invariant
+    in the bin index: predicting bin 5 when the target is 60 costs exactly what predicting
+    bin 61 costs. The head has no notion that coordinates live on a line, which is why the
+    Bezier and smoothness losses have to reach back through a temperature-0.1 softmax and a
+    straight-through estimator to recover geometry.
+
+    With smooth_sigma > 0 the target becomes a discretized Gaussian centred on the true
+    bin, renormalized over the bins that exist (so the mass clipped at the two boundaries
+    is redistributed rather than lost). smooth_sigma = 0 returns the original one-hot
+    exactly, which is what keeps the Tier 1 numbers comparable.
+    """
+    if smooth_sigma <= 0:
+        return F.one_hot(tgt_args, n_bins)
+
+    bins = torch.arange(n_bins, device=tgt_args.device, dtype=torch.float32)
+    dist = bins - tgt_args.unsqueeze(-1).to(torch.float32)
+    weights = torch.exp(-0.5 * (dist / smooth_sigma) ** 2)
+    return weights / weights.sum(-1, keepdim=True)
+
+
+def numericalize(cmd, n=None):
     """NOTE: shall only be called after normalization"""
-    # assert np.max(cmd.origin) <= 1.0 and np.min(cmd.origin) >= -1.0 
+    # assert np.max(cmd.origin) <= 1.0 and np.min(cmd.origin) >= -1.0
+    # E13: default follows --n_args_bins so every call site (model_main.fetch_data,
+    # test_few_shot, the aux-Bezier path below) moves together. The separate n=64 copy in
+    # data_utils/relax_rep.py is preprocessing-only and never reaches the persisted
+    # sequences -- see PROJECT_PLAN.md 1.5.
+    n = opts.n_args_bins if n is None else n
     cmd = (cmd / 30 * n).round().clip(min=0, max=n-1).int()
     return cmd
 
-def denumericalize(cmd, n=128):
-    cmd = cmd / n * 30 
+def denumericalize(cmd, n=None):
+    n = opts.n_args_bins if n is None else n
+    cmd = cmd / n * 30
     return cmd
 
 def attention(query, key, value, mask=None, trg_tri_mask=None,dropout=None, posr=None):

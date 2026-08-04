@@ -20,12 +20,14 @@ This document covers both graded stages. It absorbs and replaces `archive/STAGE2
 | Best measured number | Chinese Error (L1) **0.1668**, mean IoU 0.2550, over 34 fonts and 1768 glyphs, at epoch 125 |
 | Paper's Chinese number | **0.080** |
 | Paper metric implemented | Yes, `eval_reconstruction_error.py` |
-| Missing for Stage 1 | SSIM, renderability rate, per-font CSV, quantization oracle, bin histogram |
-| Missing for Stage 2 | Everything below §3 (seed-noise floor measured: L1 spread 0.0077, see §3.2) |
+| Missing for Stage 1 | SSIM, quantization oracle (renderability, per-font CSV and the bin histogram landed) |
+| Stage 2, Tier 1 | Run and screened 2026-08-04. Nothing cleared the noise floor; see §3.2 |
+| Stage 2, Tier 2 | Coded 2026-08-04, staged in `scripts/run_experiments.sh`, unrun. Runbook: `docs/tier2-launch.md` |
+| Seed-noise floor | L1 spread **0.0093** (re-measured 2026-08-04). Decomposition into decode vs seed noise pending, `scripts/eval_noise.sh` |
 
 0.1668 sits essentially on DeepSVG's published Chinese number (0.167), so the baseline is inside the benchmark's range even though it does not reach the paper. §2.4 says how to write that up. It is not a blocker for Stage 2, which is measured against your own baseline rather than against 0.080.
 
-Infrastructure landed today: `--seed`, wandb mirroring alongside TensorboardX, `--max_ckpt_keep` defaulting to 1, and three Stage 2 flags declared but not yet wired. Details in `docs/infra-upgrade.md`.
+Infrastructure, as of 2026-08-04: `--seed`, wandb mirroring alongside TensorboardX, `--max_ckpt_keep`, a `checkpoint_metrics.csv` manifest replacing the filename-embedded val loss, and all of Tier 1's and Tier 2's flags wired and covered by `check_infra.py` (127 checks). Details in `docs/infra-upgrade.md`.
 
 ---
 
@@ -163,7 +165,7 @@ Optional, only if the schedule loosens: FID on rendered glyph images. Defensible
 
 ### 2.3 Two one-off measurements
 
-**Bin histogram.** Histogram `numericalize` output over the ground-truth training data and count the mass in bins 0 and 127, for Chinese and for English. `numericalize` does `.clip(min=0, max=n-1)`, so any coordinate outside `[0, 30]` is destroyed. Separately, `SVGEmbedding.arg_embed = nn.Embedding(128, 128, padding_idx=0)` maps bin 0 to a frozen zero vector, so a coordinate at the lower boundary is truncated on the way out and unrepresented on the way in. One script, trivially checkable, and it makes a good figure.
+**Bin histogram.** Histogram `numericalize` output over the ground-truth training data and count the mass in bins 0 and 127, for Chinese and for English. `numericalize` does `.clip(min=0, max=n-1)`, so any coordinate outside `[0, 30]` is destroyed. Separately, `SVGEmbedding.arg_embed = nn.Embedding(128, 128, padding_idx=0)` freezes bin 0's embedding row (at its kaiming init value, not at zero — see the correction in §3.5), so a coordinate at the lower boundary is truncated on the way out and unlearnable on the way in. One script, trivially checkable, and it makes a good figure.
 
 This histogram also answers the open question in §1.5 about the two quantization grids, which is the thing that actually decides E13. Plot the full 128-bin histogram and look at its shape:
 
@@ -251,6 +253,19 @@ The flow-matching coordinate head in `archive/FLOW_MATCHING_PLAN.md` was the alt
 
 Renderability was 100% (1768/1768) for every row, so nothing here is confounded by the renderability caveat in §1.5. **This is itself the Tier 1 result: none of E7/E9/E10/E1 individually clear a noise floor that grew past the bar meant to screen them.** Two live implications for §3.5-§3.7 and the report: (1) don't spend more budget re-running Tier 1 single-factor points expecting a different sign, the effect sizes here are smaller than what this screening setup can resolve; (2) either the screening budget (`n_samples 3`, 60-epoch option in §3.3) needs to grow to shrink the noise floor below 0.008, or the bar itself needs revisiting — both are §8 decisions, not something to silently paper over in the results table.
 
+**The floor is not all seed noise, and the decomposition is now the priority (2026-08-04).** Two things vary between any two screening numbers: the training seed, and the eval decode. `test_few_shot.py` never calls `setup_seed`, and the σ=1.0 encoder perturbation is the only source of stochasticity at inference, so best-of-`n_samples` picks a different candidate on every run. The re-measurement above already caught this — seeds 1111 and 2222 selected the same checkpoint under both the old and the new `val_metric`, and their L1 still moved by 0.001–0.003.
+
+The two components have different remedies, which is why separating them is worth doing before spending more training budget:
+
+| Dominant component | Remedy | Cost |
+|---|---|---|
+| Decode noise | Raise `--n_samples` for screening, re-screen Tier 1 at the new budget | Eval only, no retraining |
+| Seed noise | Run each candidate at 3 seeds | 3× the training matrix, and Tier 3 pays for it |
+
+`scripts/eval_noise.sh` measures the decode component directly, by re-screening one fixed checkpoint several times: the weights never change, so the spread it reports is decode noise alone. It also runs an `n_samples` ladder at 10 and 20 to show how fast that component shrinks. Costs no training GPU; it runs alongside the Tier 2 batch. Record the result here as a dated **Measured** paragraph, and only then move `NOISE_FLOOR` in `scripts/test_experiments.sh` off 0.0093.
+
+The report needs this either way. "Which candidates fell inside the seed noise" (§6, discussion) is a much weaker sentence than an account of what the noise was made of.
+
 **Screen cheap, confirm expensive.** Do not run `test_few_shot.py --n_samples 50` over all 34 test fonts for every candidate.
 
 - *Screening eval*: 8 fixed test fonts, `--n_samples 3`, at a fixed epoch. Minutes.
@@ -328,6 +343,23 @@ Wire the `--dropout` flag, already declared, and sweep {0, 0.1, 0.2}. Note the o
 
 Good ideas, slightly more code. §8 asks you which of these to keep.
 
+**Coded and staged 2026-08-04.** All four are wired behind flags whose defaults reproduce the released behaviour exactly, on the same discipline as Tier 1 (§7.2), so the Tier 1 table and the seed floor stay valid references. `check_infra.py` section 7 asserts each flag reaches the model or the optimizer; 127 checks pass. The batch is eight runs at seed 1111, three GPUs, three waves, ~3 h. Runbook: `docs/tier2-launch.md`.
+
+| Run | Flag | Candidate |
+|---|---|---|
+| `e8_ls05_chn` / `e8_ls10_chn` / `e8_ls20_chn` | `--args_label_smooth_sigma` ∈ {0.5, 1.0, 2.0} | E8 |
+| `e13_bins256_chn` | `--n_args_bins 256` | E13, bin count |
+| `e13_nopad_chn` | `--arg_embed_pad_idx False` | E13, `padding_idx` |
+| `e3_refine2_chn` / `e3_refine3_chn` | `--n_layers_refine` ∈ {2, 3} | E3 |
+| `e14_wucos_chn` | `--lr_schedule warmup_cosine` | E14 |
+
+Two deviations from what this section originally specified, both deliberate:
+
+1. **E13 is split into two runs** rather than bundling the bin count with `padding_idx`. They are independent factors and the protocol is one at a time.
+2. **E13's oracle gate is skipped.** It runs after the batch and explains the result rather than licensing it. The alternative was holding a training slot idle behind a script that had not been written.
+
+Read the Tier 1 outcome before reading these results: every candidate there landed inside a floor that grew past the bar meant to screen it. Tier 2's effect sizes are in the same neighbourhood, so the realistic expectation is "recorded, not claimed", and the value of E3 and E13 to the report is partly independent of their sign — both are paper-versus-code corrections from §1.4.
+
 **E8 — Ordinal label smoothing on the argument head.** *Maps to: modify the loss function, add regularization.*
 
 The 128-way cross-entropy over quantized coordinates is permutation-invariant in the bin index: predicting bin 5 when the target is 60 costs exactly what predicting bin 61 costs. The head has no notion that coordinates live on a line, which is why the Bézier and smoothness losses have to reach back through a temperature-0.1 softmax and a straight-through estimator to recover geometry.
@@ -342,7 +374,9 @@ Sec. 3.1 specifies 256; the model path uses 128. Doubling the bins halves the ±
 
 Touch points: `numericalize(n=128)` and `denumericalize(n=128)` in `models/transformers.py`, `SVGEmbedding.arg_embed`, `args_fcn` output width, the `reshape(N, S, 8, 128)` calls, and `F.one_hot(tgt_args, 128)`. Five constants, all findable by grepping `128`. Careful: `arg_embed` is `nn.Embedding(128, 128)`, where the two 128s mean different things, vocabulary and embedding width. Only the first changes.
 
-While there, drop `padding_idx=0` from `arg_embed`, or shift arguments by +1. Bin 0 is a legitimate coordinate and currently gets a frozen zero embedding.
+While there, drop `padding_idx=0` from `arg_embed`, or shift arguments by +1. Bin 0 is a legitimate coordinate and its embedding never trains.
+
+**Corrected 2026-08-04.** This document said elsewhere that bin 0 "gets a frozen zero embedding". It does not. `nn.Embedding(..., padding_idx=0)` zeroes row 0 at construction, but `SVGEmbedding._init_embeddings` then runs `kaiming_normal_` over the whole weight and overwrites that zero. `padding_idx` survives only as a zero gradient, so row 0 ends up frozen at a *random* kaiming vector. The defect is the same size either way — a legitimate coordinate whose representation is fixed at initialization — but the report should describe it accurately, and "frozen at noise" is a slightly worse failure than "frozen at zero".
 
 **Gated twice. The first gate is cleared (2026-08-03).** The n=64 preprocessing grid never reached the persisted sequences: `relax_rep` saves `sequence_relaxed.npy` before `cal_aux_bezier_pts` mutates its argument, and the dataloader reads that file. See §1.5. The training data is at full resolution, so adding bins to the head adds resolution the data actually has.
 
@@ -394,6 +428,10 @@ Dated against a 15 August deadline. Day 1 is Monday 3 August.
 | Fri 7 Aug | 5 | Compute the `val_metric` vs rendered-Error rank correlation (§3.2). Decide the screening metric for everything after this point. |
 | Sat 8 – Mon 10 | 6–8 | Tier 2, subject to §8: E8, E13, E3, E14. Plus the test-time σ sweep on the E9 winner. |
 | Tue 11 Aug | 9 | Tier 3, as many as fit. |
+
+**Actual, as of 2026-08-04 (day 2).** Ahead of the table above, not behind it. Tier 1 launched on day 1 rather than day 3, and finished and re-ran under the `val_metric` fix by day 2 morning. Tier 2 is coded and staged on day 2 rather than day 6. Days 3 to 5 are therefore free, which is what buys back the report time §4 flags as tight, and it removes the §8 pressure to drop Tier 3.
+
+What is *behind*: Stage 1 has not closed. SSIM and the quantization oracle are still unwritten, and §2.4 has not been answered in prose. Both are eval-only, neither needs a GPU day, and the oracle now has a second reason to exist — it explains the E13 result. Do them while Tier 2 trains.
 | Wed 12 – Thu 13 | 10–11 | Combine winners (§3.7). Confirmation eval on baseline and combined. Paired Wilcoxon. |
 | Thu 13 – Fri 14 | 11–12 | Report. |
 | Sat 15 Aug | 13 | Buffer and submit. |
@@ -509,9 +547,9 @@ Housekeeping either way: delete the checkpoints of any candidate that has been s
 
 Three rungs, cheapest first. Do not skip a rung.
 
-1. **Local, no GPU.** `python scripts/check_infra.py`. Verifies flag names, types and defaults; verifies `--wandb False` actually disables; statically verifies the `train.py` wiring; runs a live wandb init/log/finish in offline mode. 59 checks, seconds. Passing as of today.
-2. **Cluster, GPU, 2 epochs.** The smoke test in `docs/infra-upgrade.md`. Confirms a run appears in wandb with config and scalars, and that a checkpoint is written and pruned.
-3. **Cluster, full.** The 3-seed baseline from §3.2.
+1. **Local, no GPU.** `python scripts/check_infra.py`. Verifies flag names, types and defaults; verifies `--wandb False` actually disables; statically verifies the `train.py` wiring, the checkpoint-metric manifest, and that every Tier 1 and Tier 2 flag reaches the model or the optimizer; runs a live wandb init/log/finish in offline mode. **127 checks**, seconds. Passing as of 2026-08-04.
+2. **Cluster, GPU, 2 epochs.** The smoke test in `docs/infra-upgrade.md`, and for Tier 2 the four in `docs/tier2-launch.md` §1. Confirms a run appears in wandb with config and scalars, and that a checkpoint is written, logged to the manifest and pruned. Candidates that change tensor shapes or `state_dict` keys (E13, E3) need this rung; loss-only and optimizer-only ones (E8, E14) cannot fail on load.
+3. **Cluster, full.** The batch itself.
 
 ---
 
@@ -519,12 +557,13 @@ Three rungs, cheapest first. Do not skip a rung.
 
 These are yours. The plan does not commit to them.
 
-1. **Tier 2 scope.** Four candidates (E8, E13, E3, E14) in three days is realistic only if the budget calibration in §3.3 lands in the ≤3h band. Which do you keep if it does not? E3 is one character and E14 helps short runs generally, so those two are the cheap keeps. E8 is the most interesting modelling idea. E13 is gated on the oracle result anyway.
-2. **Tier 3 at all.** Day 9 is the only slot, and dropping it buys back the report time §4 flags as tight.
-3. **English.** Currently out of scope. It is a second language column in the results table and a stronger reconstruction section, against roughly a day.
-4. **Screening budget.** 60 epochs doubles the candidate count and needs the one validation run described in §3.3. 150 epochs everywhere is safer and roughly halves the matrix.
-5. **Fix the §1.5 eval-script issue, or work around it.** If the per-checkpoint layout is genuinely broken, fixing it properly is 20 minutes and touches a graded diff. Worth doing.
-6. **What `--max_ckpt_keep 1` means for the sweep.** Keeping one checkpoint per run is right for disk, but if you later want to score a candidate at both 60 and 150 epochs you need both. Consider 2 for the runs that feed §3.3's validation.
+1. ~~**Tier 2 scope.**~~ **Resolved 2026-08-04: all four, one seed each, eight runs.** ~1 h per run puts this in §3.3's ≤3 h band, so nothing needed cutting. Breadth over depth for the first pass — deepen whichever candidate leads rather than guessing which one deserves three seeds up front. E13 runs without waiting on its oracle gate; see §3.5.
+2. **Tier 3 at all.** Day 9 is the only slot, and dropping it buys back the report time §4 flags as tight. **Live again as of 2026-08-04**, and now competing with two better uses of the same GPU time: (a) re-running the leading Tier 2 candidate at three seeds so it has a mean rather than a point, (b) re-screening everything at a larger `n_samples` if `eval_noise.sh` says decode noise dominates. Both sharpen results that already exist. Tier 3 adds seven more single points to a table where single points have so far proven unresolvable.
+3. **The screening bar itself.** 0.0093 is larger than the 0.008 it replaced and larger than every effect measured so far, which means the current setup cannot resolve anything in this class. Either the budget grows until the floor drops below the effects, or the report says plainly that it did not, and treats the floor as the finding. Do not quietly compare against the old 0.008 to make a candidate look like a winner. §3.2 has the decomposition that decides which branch is affordable.
+4. **English.** Currently out of scope. It is a second language column in the results table and a stronger reconstruction section, against roughly a day. Days 3 to 5 came free (§4), so this is more affordable than it was.
+5. ~~**Screening budget.**~~ **Resolved 2026-08-03: 150 epochs everywhere.** Superseded in part by item 3 — the open question is no longer epochs but `n_samples`, and §3.2's decomposition answers it.
+6. ~~**Fix the §1.5 eval-script issue.**~~ **Resolved 2026-08-03**, layout is per-checkpoint and the script handles both.
+7. **What `--max_ckpt_keep` means for the sweep.** Keeping one checkpoint per run is right for disk, but if you later want to score a candidate at both 60 and 150 epochs you need both. Consider 2 for the runs that feed §3.3's validation.
 
 ---
 

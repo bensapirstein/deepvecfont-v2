@@ -36,46 +36,65 @@ GPUS=(1 2 3)
 # One entry per experiment: "name_exp  <extra args appended to COMMON_ARGS>".
 # This is the loop-over-params spot — add/edit lines here for a sweep.
 #
-# Full re-run, 2026-08-03 night: all of Tier 1 in one batch. The seedfloor and
-# E7 runs below already trained once, but under the pre-fix compute_val_loss
-# (see PROJECT_PLAN.md §1.4 "Fixed 2026-08-03") — val_metric silently omitted
-# the refinement-decoder loss, so prune_checkpoints could have kept the wrong
-# checkpoint as "best" for every one of them. Their old experiment dirs were
-# moved to experiments/archive_pre_metricfix/ rather than deleted. Re-running
-# them here selects checkpoints under the corrected metric.
+# Tier 2, 2026-08-04 (PROJECT_PLAN.md §3.5). Eight runs, one seed each, on the
+# breadth-over-depth allocation: cover the whole tier first, deepen whichever
+# candidate leads afterwards. Three GPUs, three waves, ~1 h per run.
+#
+# Every entry stays at --seed 1111 and shares COMMON_ARGS with the Tier 1 batch,
+# so each row is comparable to seedfloor_1111_chn (L1 0.1724) on exactly one
+# changed factor. Read the caveat first: the re-measured seed floor is 0.0093 and
+# no Tier 1 candidate cleared it, so a single point here is unlikely to either.
+# The eval-noise decomposition in scripts/eval_noise.sh runs alongside this batch
+# to work out how much of that 0.0093 is decode noise rather than seed noise.
 EXPERIMENTS=(
-  # 3-seed noise floor (PROJECT_PLAN.md §3.2). Re-run under the fixed metric;
-  # previous L1 spread 0.0077 was measured on possibly-mis-selected checkpoints.
-  "seedfloor_1111_chn --seed 1111"
-  "seedfloor_2222_chn --seed 2222"
-  "seedfloor_3333_chn --seed 3333"
+  # E8, ordinal label smoothing on the argument head. The 128-way cross-entropy
+  # is permutation-invariant in the bin index — predicting bin 5 for a target of
+  # 60 costs what predicting 61 costs — so the head has no notion that coordinates
+  # live on a line. sigma is in bins. sigma=0 is the baseline, not repeated.
+  # Screens on the rendered metric: it changes the cross-entropy scale, so
+  # val_metric is not comparable across these rows (§1.5).
+  "e8_ls05_chn --seed 1111 --args_label_smooth_sigma 0.5"
+  "e8_ls10_chn --seed 1111 --args_label_smooth_sigma 1.0"
+  "e8_ls20_chn --seed 1111 --args_label_smooth_sigma 2.0"
 
-  # E7: loss_w_aux sweep (PROJECT_PLAN.md §3.4). Eq. 11 weights L_bezier at 1.0;
-  # options.py defaults it to 0.01, a factor of 100 below. No code change,
-  # the flag already exists. The 0.01 point IS seedfloor_1111_chn (same seed,
-  # same COMMON_ARGS, default loss_w_aux) — not repeated here.
-  "e7_aux01_chn --seed 1111 --loss_w_aux 0.1"
-  "e7_aux03_chn --seed 1111 --loss_w_aux 0.3"
-  "e7_aux10_chn --seed 1111 --loss_w_aux 1.0"
+  # E13, quantization. Split into two one-factor runs rather than the one bundled
+  # change §3.5 describes, because bin count and padding_idx are independent and
+  # the protocol is one factor at a time. Gate 2 (the oracle) is deliberately
+  # skipped: it runs after, to explain the result rather than to license it.
+  # Also screens on the rendered metric — 256 bins changes the CE scale too.
+  "e13_bins256_chn --seed 1111 --n_args_bins 256"
+  "e13_nopad_chn --seed 1111 --arg_embed_pad_idx False"
 
-  # E9, encoder noise. sigma=1.0 is the baseline (seedfloor_1111_chn), not
-  # repeated here. Test sigma stays at 1.0 throughout: it is the only source
-  # of stochasticity at inference, so setting it to 0 makes all n_samples
-  # candidates identical. It gets its own sweep later, on the winning train sigma.
-  "e9_sigma000_chn --seed 1111 --enc_noise_std_train 0.0"
-  "e9_sigma010_chn --seed 1111 --enc_noise_std_train 0.1"
-  "e9_sigma025_chn --seed 1111 --enc_noise_std_train 0.25"
-  "e9_sigma050_chn --seed 1111 --enc_noise_std_train 0.5"
+  # E3, self-refinement decoder depth. Sec. 3.3 says 2 layers, the code clones 1.
+  # This is the decoder whose output is actually scored (§1.1), which is why one
+  # character earns a slot.
+  "e3_refine2_chn --seed 1111 --n_layers_refine 2"
+  "e3_refine3_chn --seed 1111 --n_layers_refine 3"
 
-  # E10, dropout. 0.0 is the baseline, again already measured.
-  "e10_drop01_chn --seed 1111 --dropout 0.1"
-  "e10_drop02_chn --seed 1111 --dropout 0.2"
-
-  # E1, terminal LayerNorm on both encoder stacks. Run alone and with the E9
-  # winner: normalizing the residual stream is what makes sigma a meaningful
-  # quantity rather than an arbitrary one, so the interaction is the point.
-  "e1_norm_chn --seed 1111 --enc_final_norm True"
+  # E14, warmup + cosine. ExponentialLR(0.997) over 150 epochs multiplies the lr
+  # by 0.64, so the released schedule is effectively constant at this budget, and
+  # there is no warmup at all. Disproportionately helps short runs, which is what
+  # the entire matrix consists of. If it wins, it applies to every run after it
+  # and the protocol section has to say so.
+  "e14_wucos_chn --seed 1111 --lr_schedule warmup_cosine"
 )
+
+# Tier 1 batch, 2026-08-03 night, kept for provenance. Re-run under the fixed
+# compute_val_loss (PROJECT_PLAN.md §1.5) after val_metric was found to omit the
+# refinement-decoder loss. Results in §3.2: noise floor 0.0093, nothing cleared it.
+#   "seedfloor_1111_chn --seed 1111"
+#   "seedfloor_2222_chn --seed 2222"
+#   "seedfloor_3333_chn --seed 3333"
+#   "e7_aux01_chn --seed 1111 --loss_w_aux 0.1"
+#   "e7_aux03_chn --seed 1111 --loss_w_aux 0.3"
+#   "e7_aux10_chn --seed 1111 --loss_w_aux 1.0"
+#   "e9_sigma000_chn --seed 1111 --enc_noise_std_train 0.0"
+#   "e9_sigma010_chn --seed 1111 --enc_noise_std_train 0.1"
+#   "e9_sigma025_chn --seed 1111 --enc_noise_std_train 0.25"
+#   "e9_sigma050_chn --seed 1111 --enc_noise_std_train 0.5"
+#   "e10_drop01_chn --seed 1111 --dropout 0.1"
+#   "e10_drop02_chn --seed 1111 --dropout 0.2"
+#   "e1_norm_chn --seed 1111 --enc_final_norm True"
 
 # Args shared by every experiment in this batch. Identical across all of them,
 # which is what makes every row comparable to seedfloor_1111_chn.

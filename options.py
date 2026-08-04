@@ -79,4 +79,22 @@ def get_parser_main_model():
     parser.add_argument('--enc_final_norm', type=str2bool, default=False, help='[E1] add a terminal LayerNorm(512) to both sequence-encoder pre-norm stacks; the decoder already has one, the encoder does not')
     parser.add_argument('--dropout', type=float, default=0.0, help='[E10] dropout rate shared by the attention and feed-forward sublayers of both transformer stacks; every one of them is hardcoded to 0.0 upstream')
 
+    # Tier 2 experiment flags. Wired 2026-08-04, same discipline as Tier 1: every
+    # default reproduces the pre-change behaviour exactly, so the 3-seed noise floor
+    # and the whole Tier 1 table stay comparable to everything launched afterwards.
+    # See PROJECT_PLAN.md 3.5.
+    #   args_label_smooth_sigma -> models/transformers.py, Transformer.loss      (E8)
+    #   n_args_bins             -> arg_embed / args_fcn / reshapes / one_hot /
+    #                              numericalize / denumericalize                 (E13)
+    #   arg_embed_pad_idx       -> models/transformers.py, SVGEmbedding          (E13)
+    #   n_layers_refine         -> models/transformers.py, Transformer_decoder   (E3)
+    #   lr_schedule / lr_warmup_steps / lr_min_factor -> train.py                (E14)
+    parser.add_argument('--args_label_smooth_sigma', type=float, default=0.0, help='[E8] std, in bins, of the discretized Gaussian replacing the one-hot argument target; 0 keeps the original permutation-invariant one-hot cross-entropy')
+    parser.add_argument('--n_args_bins', type=int, default=128, help='[E13] number of quantization bins for the coordinate arguments; Sec. 3.1 of the paper specifies 256, the released code uses 128')
+    parser.add_argument('--arg_embed_pad_idx', type=str2bool, default=True, help='[E13] keep padding_idx=0 on SVGEmbedding.arg_embed; bin 0 is a legitimate coordinate, and padding_idx freezes its embedding row at its init value')
+    parser.add_argument('--n_layers_refine', type=int, default=1, help='[E3] depth of the parallel self-refinement decoder; Sec. 3.3 describes it as 2 layers, the released code clones 1')
+    parser.add_argument('--lr_schedule', type=str, default='exp', choices=['exp', 'warmup_cosine'], help='[E14] exp is the original per-epoch ExponentialLR(gamma=0.997); warmup_cosine is per-step linear warmup then cosine decay to the epoch budget')
+    parser.add_argument('--lr_warmup_steps', type=int, default=500, help='[E14] linear warmup length in optimizer steps; only read when --lr_schedule warmup_cosine')
+    parser.add_argument('--lr_min_factor', type=float, default=0.05, help='[E14] floor of the cosine decay as a fraction of --lr; only read when --lr_schedule warmup_cosine')
+
     return parser

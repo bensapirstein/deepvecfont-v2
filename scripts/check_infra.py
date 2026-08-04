@@ -20,6 +20,7 @@ Exit code 0 if everything passed.
 """
 import argparse
 import ast
+import math as _math
 import os
 import py_compile
 import sys
@@ -56,6 +57,14 @@ def check_options():
         ('enc_noise_std_test',   float, 1.0),
         ('dropout',              float, 0.0),
         ('enc_final_norm',       None,  False),   # str2bool, checked by identity below
+        # Tier 2, 2026-08-04.
+        ('args_label_smooth_sigma', float, 0.0),
+        ('n_args_bins',          int,   128),
+        ('arg_embed_pad_idx',    None,  True),    # str2bool
+        ('n_layers_refine',      int,   1),
+        ('lr_schedule',          str,   'exp'),
+        ('lr_warmup_steps',      int,   500),
+        ('lr_min_factor',        float, 0.05),
     ]
     for dest, typ, default in expected:
         if not check(f"--{dest} exists", dest in actions):
@@ -80,6 +89,26 @@ def check_options():
           defaults['enc_final_norm'] is False, f"got {defaults['enc_final_norm']!r}")
     check("--enc_final_norm parses as str2bool, not as a truthy string",
           parser.parse_args(['--enc_final_norm', 'False']).enc_final_norm is False)
+
+    # Same discipline for Tier 2: every default has to be the released behaviour, or the
+    # Tier 1 table and the seed floor stop being a valid reference for Tier 2.
+    check("args_label_smooth_sigma defaults to 0, keeping the one-hot target",
+          defaults['args_label_smooth_sigma'] == 0.0)
+    check("n_args_bins defaults to the released 128, not the paper's 256",
+          defaults['n_args_bins'] == 128)
+    check("arg_embed_pad_idx defaults on, keeping padding_idx=0",
+          defaults['arg_embed_pad_idx'] is True, f"got {defaults['arg_embed_pad_idx']!r}")
+    check("n_layers_refine defaults to the released 1, not the paper's 2",
+          defaults['n_layers_refine'] == 1)
+    check("lr_schedule defaults to exp, the original ExponentialLR",
+          defaults['lr_schedule'] == 'exp')
+    check("--arg_embed_pad_idx parses as str2bool, not as a truthy string",
+          parser.parse_args(['--arg_embed_pad_idx', 'False']).arg_embed_pad_idx is False)
+    try:
+        parser.parse_args(['--lr_schedule', 'linear'])
+        check("--lr_schedule rejects an unknown schedule", False, "it was accepted")
+    except SystemExit:
+        check("--lr_schedule rejects an unknown schedule", True)
 
     # Regression guard: the flags the training commands in COMMANDS.md rely on.
     for dest in ('language', 'max_seq_len', 'ref_nshot', 'name_exp', 'freq_ckpt', 'n_epochs'):
@@ -313,6 +342,96 @@ def check_stage2_wiring():
           'attn_dropout = 0.,' not in mm_src)
 
 
+def check_tier2_wiring():
+    """Static check that the Tier 2 flags actually reach the model and the optimizer.
+
+    Same failure mode as section 5, and it bites harder here: E13 changes tensor shapes
+    in seven places and missing one of them is either a crash or, worse, a head that
+    predicts over 256 bins against a target built at 128. Wired 2026-08-04; see
+    PROJECT_PLAN.md 3.5.
+    """
+    print("\n7. tier 2 wiring: E8 / E13 / E3 / E14 [static, source]")
+
+    with open(os.path.join(REPO, 'models', 'transformers.py')) as fh:
+        tf_src = fh.read()
+    with open(os.path.join(REPO, 'train.py')) as fh:
+        train_src = fh.read()
+
+    # E8. The target distribution moves behind one helper so the one-hot path and the
+    # smoothed path cannot drift apart.
+    check("E8: build_args_target exists", 'def build_args_target(' in tf_src)
+    check("E8: the loss builds its target through it",
+          'build_args_target(tgt_args, opts.n_args_bins, opts.args_label_smooth_sigma)' in tf_src)
+    check("E8: sigma <= 0 still returns the exact one-hot",
+          'if smooth_sigma <= 0:' in tf_src and 'return F.one_hot(tgt_args, n_bins)' in tf_src)
+    check("E8: the smoothed target is renormalized over the bins that exist",
+          "weights / weights.sum(-1, keepdim=True)" in tf_src,
+          "without renormalizing, a target near bin 0 or 127 loses mass off the end")
+    check("E8: the raw one-hot argument target is gone from the loss",
+          'F.one_hot(tgt_args, 128)' not in tf_src)
+
+    # E13. Seven hardcoded bin counts; every one of them has to follow the flag.
+    for label, needle in [
+        ("arg_embed vocabulary", 'nn.Embedding(opts.n_args_bins, 128,'),
+        ("args_fcn output width", 'nn.Linear(512, 8 * opts.n_args_bins)'),
+        ("logit reshapes", 'args_logits.reshape(N, S, 8, opts.n_args_bins)'),
+        ("seqlen_mask3", 'repeat(1,1,8,opts.n_args_bins)'),
+    ]:
+        check(f"E13: {label} follows --n_args_bins", needle in tf_src)
+    check("E13: both decoder passes reshape on the flag",
+          tf_src.count('args_logits.reshape(N, S, 8, opts.n_args_bins)') == 2,
+          f"found {tf_src.count('args_logits.reshape(N, S, 8, opts.n_args_bins)')}, expected 2 "
+          "(Transformer_decoder.forward and .parallel_decoder)")
+    check("E13: numericalize defaults to the flag",
+          'def numericalize(cmd, n=None):' in tf_src
+          and 'n = opts.n_args_bins if n is None else n' in tf_src)
+    check("E13: denumericalize defaults to the flag",
+          'def denumericalize(cmd, n=None):' in tf_src)
+    check("E13: no hardcoded 128-bin arithmetic survives in the model path",
+          'n=128' not in tf_src and '8 * 128' not in tf_src,
+          "a leftover 128 makes the head and the target disagree silently")
+    check("E13: padding_idx is conditional",
+          'padding_idx=0 if opts.arg_embed_pad_idx else None' in tf_src)
+
+    # E3.
+    check("E3: the refinement decoder depth follows --n_layers_refine",
+          'c(ff), dropout=p_drop), opts.n_layers_refine)' in tf_src)
+    check("E3: the sequential decoder depth is untouched at 6",
+          'c(ff), dropout=p_drop), 6)' in tf_src,
+          "only the parallel/refinement stack is the E3 factor")
+
+    # E14. The schedule changes cadence, so both step sites have to be guarded.
+    check("E14: the schedule is selected by flag",
+          "sched_per_step = opts.lr_schedule == 'warmup_cosine'" in train_src)
+    check("E14: 'exp' still builds the original ExponentialLR(gamma=0.997)",
+          'ExponentialLR(optimizer, gamma=0.997)' in train_src)
+    check("E14: warmup_cosine steps per optimizer step",
+          'if sched_per_step:                # E14' in train_src)
+    check("E14: the per-epoch step is guarded so it cannot double-step",
+          'if not sched_per_step:' in train_src,
+          "stepping both per batch and per epoch would decay the lr ~40x too fast")
+    check("E14: math is imported for the cosine",
+          'import math' in train_src)
+
+    # The arithmetic, checked rather than trusted: warmup ramps to 1.0 and the cosine
+    # lands on the floor, with no discontinuity at the handover.
+    warmup, total, floor = 500, 151 * 40, 0.05
+
+    def factor(step):
+        if step < warmup:
+            return (step + 1) / warmup
+        progress = min(1.0, (step - warmup) / (total - warmup))
+        return floor + (1.0 - floor) * 0.5 * (1.0 + _math.cos(_math.pi * progress))
+
+    check("E14: warmup ends at exactly 1.0x lr", abs(factor(warmup - 1) - 1.0) < 1e-9)
+    check("E14: no jump across the warmup boundary",
+          abs(factor(warmup) - factor(warmup - 1)) < 1e-3)
+    check("E14: the cosine lands on the floor", abs(factor(total - 1) - floor) < 1e-3)
+    check("E14: it actually moves the lr, unlike exp",
+          factor(total - 1) < 0.997 ** 150,
+          f"cosine ends at {factor(total - 1):.3f}, exp ends at {0.997 ** 150:.3f}")
+
+
 def check_checkpoint_metric():
     """Static check that checkpoint selection covers what test-time scoring uses.
 
@@ -353,6 +472,7 @@ def main():
     check_wandb_roundtrip()
     check_stage2_wiring()
     check_checkpoint_metric()
+    check_tier2_wiring()
 
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed")
     if FAILED:
