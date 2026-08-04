@@ -28,6 +28,56 @@ def setup_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
+class WeightEMA:
+    """[E15] Exponential moving average of the model weights, used for evaluation.
+
+    Kept deliberately blunt: the shadow is swapped *into* the live model around the
+    validation pass and the checkpoint save, then swapped back out. That means the
+    saved 'model' state_dict holds the EMA weights under the original key names, so
+    test_few_shot.py, best_checkpoint.py, prune_checkpoints and the metrics manifest
+    all keep working with no changes at all. The cost is that --resume restores the
+    EMA weights as the training weights rather than the raw ones; nothing in the
+    sweep resumes, and check_infra asserts the flag is off by default.
+
+    Buffers (BatchNorm running stats, under --img_norm batch) are copied rather than
+    averaged, since they are already running averages.
+    """
+
+    def __init__(self, model, decay):
+        self.decay = decay
+        self.n_updates = 0
+        self.shadow = {k: v.detach().clone().float()
+                       for k, v in model.state_dict().items()
+                       if v.dtype.is_floating_point}
+        self.backup = None
+
+    @torch.no_grad()
+    def update(self, model):
+        self.n_updates += 1
+        # Standard bias correction, so the first few hundred steps are not dominated
+        # by the random initialization sitting in the shadow.
+        d = min(self.decay, (1.0 + self.n_updates) / (10.0 + self.n_updates))
+        for k, v in model.state_dict().items():
+            if k in self.shadow:
+                self.shadow[k].mul_(d).add_(v.detach().float(), alpha=1.0 - d)
+
+    @torch.no_grad()
+    def swap_in(self, model):
+        sd = model.state_dict()
+        self.backup = {k: sd[k].detach().clone() for k in self.shadow}
+        for k in self.shadow:
+            sd[k].copy_(self.shadow[k])
+
+    @torch.no_grad()
+    def swap_out(self, model):
+        if self.backup is None:
+            return
+        sd = model.state_dict()
+        for k, v in self.backup.items():
+            sd[k].copy_(v)
+        self.backup = None
+
+
 def compute_val_loss(model_main, val_loader, opts):
     loss_val = {'img':{'l1':0.0, 'vggpt':0.0}, 'svg':{'total':0.0, 'cmd':0.0, 'args':0.0, 'aux':0.0},
                 'svg_para':{'total':0.0, 'cmd':0.0, 'args':0.0, 'aux':0.0}}
@@ -89,7 +139,14 @@ def train_main_model(opts):
                         {"params": model_main.modality_fusion.parameters()}, {"params": model_main.transformer_main.parameters()},
                         {"params": model_main.transformer_seqdec.parameters()}]
 
-    optimizer = Adam(parameters_all, lr=opts.lr, betas=(opts.beta1, opts.beta2), eps=opts.eps, weight_decay=opts.weight_decay)
+    # E11. Adam applies --weight_decay as an L2 term added to the gradient, so it is
+    # scaled by the per-parameter adaptive rate and is not decoupled weight decay at
+    # all. AdamW decouples it. Both default paths are identical at weight_decay=0,
+    # which is the released setting, so 'adam' reproduces the baseline exactly.
+    optimizer_cls = AdamW if opts.optimizer == 'adamw' else Adam
+    optimizer = optimizer_cls(parameters_all, lr=opts.lr, betas=(opts.beta1, opts.beta2), eps=opts.eps, weight_decay=opts.weight_decay)
+    if opts.optimizer == 'adamw':
+        print(f"[E11] AdamW, weight_decay={opts.weight_decay}")
 
     start_epoch = opts.init_epoch
     if opts.resume:
@@ -99,6 +156,13 @@ def train_main_model(opts):
         optimizer.load_state_dict(checkpoint['opt'])
         start_epoch = checkpoint['n_epoch'] + 1
         print(f"Resumed from {ckpt_path}, starting at epoch {start_epoch}")
+
+    # E15. After .cuda() so the shadow lands on the GPU, and after --resume so the
+    # shadow starts from the restored weights rather than the initialization.
+    ema = WeightEMA(model_main, opts.ema_decay) if opts.ema_decay > 0 else None
+    if ema is not None:
+        print(f"[E15] weight EMA active, decay={opts.ema_decay}; "
+              f"val and checkpoints use the averaged weights")
 
     # E14. The original schedule is ExponentialLR(gamma=0.997) stepped per epoch, which
     # over 150 epochs multiplies the lr by 0.997^150 = 0.64 -- effectively constant at the
@@ -150,6 +214,8 @@ def train_main_model(opts):
             optimizer.zero_grad()
             loss.backward()       
             optimizer.step()
+            if ema is not None:               # E15, after the step that produced them
+                ema.update(model_main)
             if sched_per_step:                # E14
                 scheduler.step()
             batches_done = epoch * len(train_loader) + idx + 1
@@ -205,7 +271,11 @@ def train_main_model(opts):
                 
             if opts.freq_val > 0 and batches_done % opts.freq_val == 0:
 
+                # E15: validate on the averaged weights, so val_metric selects the
+                # checkpoint that will actually be tested.
+                if ema is not None: ema.swap_in(model_main)
                 loss_val, last_val_metric = compute_val_loss(model_main, val_loader, opts)
+                if ema is not None: ema.swap_out(model_main)
 
                 if opts.tboard:
                     for loss_cat in ['img', 'svg', 'svg_para']:
@@ -239,6 +309,9 @@ def train_main_model(opts):
             scheduler.step()
 
         if epoch % opts.freq_ckpt == 0:
+            # E15: both the scored val_metric and the saved weights are the EMA ones,
+            # under the original state_dict keys, so nothing downstream changes.
+            if ema is not None: ema.swap_in(model_main)
             loss_val, last_val_metric = compute_val_loss(model_main, val_loader, opts)
             ckpt_name = f'{epoch}_{batches_done}.ckpt'
             ckpt_path = os.path.join(dir_ckpt, ckpt_name)
@@ -246,6 +319,7 @@ def train_main_model(opts):
                 torch.save({'model':model_main.module.state_dict(), 'opt':optimizer.state_dict(), 'n_epoch':epoch, 'n_iter':batches_done}, ckpt_path)
             else:
                 torch.save({'model':model_main.state_dict(), 'opt':optimizer.state_dict(), 'n_epoch':epoch, 'n_iter':batches_done}, ckpt_path)
+            if ema is not None: ema.swap_out(model_main)
 
             checkpoint_log.append(dir_log, epoch, batches_done, ckpt_name, last_val_metric, loss_val)
 

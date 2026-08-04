@@ -58,22 +58,60 @@ GPUS=(1 2)
 #                      run correctly without it. Passed so opts.txt is honest.
 #   --args_label_smooth_sigma  no. Loss-only, never read outside Transformer.loss.
 #   --lr_schedule      no. Optimizer-only.
+#
+# Tier 3, 2026-08-04. Same question, answered per flag:
+#   --img_norm         YES. Swaps LayerNorm for GroupNorm/BatchNorm2d/InstanceNorm2d
+#                      in both image stacks. Different modules, different state_dict
+#                      keys and shapes. Omitting it is a load crash.
+#   --ngf              YES. Every conv width in both image stacks, plus fc_fusion.
+#   --bottleneck_bits  YES. fc_fusion output width, the image decoder's input_nc,
+#                      and it decides whether z_proj exists at all.
+#   --ema_decay        no. Training-time only; the EMA weights are what got saved
+#                      into the checkpoint, under the ordinary key names.
+#   --optimizer        no. Optimizer-only, never reaches ModelMain.
+#   --weight_decay     no. Same.
+#   --kl_beta          no. Loss weight only.
 EXPERIMENTS=(
-  # Re-screened, not re-trained. The recorded 0.1724 came from a different
-  # screening session, and test_few_shot.py's best-of-n_samples decoding is
-  # unseeded, so the baseline moves ~0.001-0.003 between sessions (§3.2). Scoring
-  # it in the same batch as the candidates removes that as a confound, and it
-  # doubles as one more draw for scripts/eval_noise.sh.
+  # Re-screened, not re-trained, in the same batch as the candidates. The recorded
+  # baseline came from a different screening session, and test_few_shot.py's
+  # best-of-n_samples decoding is unseeded, so it moves ~0.001-0.003 between
+  # sessions (§3.2). Scoring it here removes that as a confound. Batch B compares
+  # against all three seed-floor runs, so all three are re-screened.
   "seedfloor_1111_chn"
-  "e8_ls05_chn"
-  "e8_ls10_chn"
-  "e8_ls20_chn"
+  "seedfloor_2222_chn"
+  "seedfloor_3333_chn"
+
+  # Batch A: Tier 3 breadth.
+  "e12_kl000_chn"
+  "e12_kl100_chn"
+  "e11_adamw_chn"
+  "e2_groupnorm_chn --img_norm group"
+  "e2_batchnorm_chn --img_norm batch"
+  "e2_instancenorm_chn --img_norm instance"
+  "e4_ngf32_chn --ngf 32"
+  "e15_ema999_chn"
+  "e5_bneck256_chn --bottleneck_bits 256"
+  "e5_bneck1024_chn --bottleneck_bits 1024"
+
+  # Batch B: multi-seed replication. Seed 1111 of each was screened in an earlier
+  # session; re-screened here so all three seeds of a candidate come from one
+  # session and the decode-noise term is common to the whole mean.
+  "e9_sigma050_chn"
+  "e9_sigma050_2222_chn"
+  "e9_sigma050_3333_chn"
+  "e1_norm_chn --enc_final_norm True"
+  "e1_norm_2222_chn --enc_final_norm True"
+  "e1_norm_3333_chn --enc_final_norm True"
   "e13_bins256_chn --n_args_bins 256"
-  "e13_nopad_chn --arg_embed_pad_idx False"
-  "e3_refine2_chn --n_layers_refine 2"
-  "e3_refine3_chn --n_layers_refine 3"
-  "e14_wucos_chn"
+  "e13_bins256_2222_chn --n_args_bins 256"
+  "e13_bins256_3333_chn --n_args_bins 256"
 )
+
+# Tier 2 screening batch, 2026-08-04, kept for provenance:
+#   "seedfloor_1111_chn"  "e8_ls05_chn"  "e8_ls10_chn"  "e8_ls20_chn"
+#   "e13_bins256_chn --n_args_bins 256"   "e13_nopad_chn --arg_embed_pad_idx False"
+#   "e3_refine2_chn --n_layers_refine 2"  "e3_refine3_chn --n_layers_refine 3"
+#   "e14_wucos_chn"
 
 # Tier 1 batch, 2026-08-03 night, kept for provenance:
 #   "seedfloor_1111_chn"  "seedfloor_2222_chn"  "seedfloor_3333_chn"

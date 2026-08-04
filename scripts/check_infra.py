@@ -65,6 +65,18 @@ def check_options():
         ('lr_schedule',          str,   'exp'),
         ('lr_warmup_steps',      int,   500),
         ('lr_min_factor',        float, 0.05),
+        # Tier 3, 2026-08-04. kl_beta / ngf / bottleneck_bits / weight_decay predate
+        # this work; they are listed so a future edit to their defaults trips a check
+        # rather than silently invalidating the Tier 1 and Tier 2 tables.
+        ('optimizer',            str,   'adam'),
+        ('img_norm',             str,   'layer'),
+        ('img_norm_groups',      int,   32),
+        ('ema_decay',            float, 0.0),
+        ('ema_warmup_steps',     int,   0),
+        ('kl_beta',              float, 0.01),
+        ('ngf',                  int,   16),
+        ('bottleneck_bits',      int,   512),
+        ('weight_decay',         float, 0.0),
     ]
     for dest, typ, default in expected:
         if not check(f"--{dest} exists", dest in actions):
@@ -464,6 +476,153 @@ def check_checkpoint_metric():
               callable(getattr(checkpoint_log, 'best_checkpoint_file', None)))
 
 
+def check_tier3_wiring():
+    """Static check that the Tier 3 flags reach the model or the optimizer.
+
+    Same guard as sections 5 and 7: a declared-but-unread flag trains happily, logs
+    itself into opts.txt and wandb, and produces a number identical to the baseline,
+    which looks like a result rather than a bug. Wired 2026-08-04; see
+    PROJECT_PLAN.md 3.6.
+    """
+    print("\n8. tier 3 wiring: E11 / E2 / E15 / E5 / E12 / E4 [static, source]")
+
+    with open(os.path.join(REPO, 'train.py')) as fh:
+        train_src = fh.read()
+    with open(os.path.join(REPO, 'models', 'model_main.py')) as fh:
+        mm_src = fh.read()
+    with open(os.path.join(REPO, 'models', 'modality_fusion.py')) as fh:
+        mf_src = fh.read()
+
+    norms_path = os.path.join(REPO, 'models', 'norms.py')
+    if not check("models/norms.py exists", os.path.exists(norms_path)):
+        return
+    with open(norms_path) as fh:
+        norms_src = fh.read()
+
+    # E11. AdamW was imported and unused; the switch has to be by flag, and 'adam'
+    # has to still build the original optimizer.
+    check("E11: the optimizer class is selected by flag",
+          "optimizer_cls = AdamW if opts.optimizer == 'adamw' else Adam" in train_src)
+    check("E11: weight_decay still reaches the optimizer",
+          'weight_decay=opts.weight_decay' in train_src)
+    check("E11: AdamW is no longer an unused import",
+          train_src.count('AdamW') >= 2)
+
+    # E12. Pre-existing wiring, asserted so a refactor of the loss sum cannot drop it.
+    check("E12: kl_beta multiplies the kl term in the training loss",
+          "opts.kl_beta * loss_dict['kl']" in train_src)
+
+    # E2 / E4. Both image stacks have to take the factory, not a hardcoded LayerNorm.
+    check("E2: model_main imports the norm factory",
+          'from .norms import make_img_norm' in mm_src)
+    check("E2: the factory is built from opts.img_norm",
+          "make_img_norm(getattr(opts, 'img_norm', 'layer')" in mm_src)
+    check("E2: no hardcoded norm_layer=nn.LayerNorm survives in model_main",
+          'norm_layer=nn.LayerNorm' not in mm_src)
+    check("E2: both image stacks receive the same norm factory",
+          mm_src.count('norm_layer=img_norm') == 2,
+          f"found {mm_src.count('norm_layer=img_norm')}, expected encoder + decoder")
+    check("E2: 'layer' returns nn.LayerNorm, so the default is unchanged",
+          'nn.LayerNorm(shape)' in norms_src)
+    check("E2: group count is reduced until it divides the channel count",
+          'channels % groups != 0' in norms_src,
+          "a fixed 32 groups fails on the ngf-wide first encoder layer")
+    check("E2: instance norm is affine, so E2 is not confounded with a capacity drop",
+          'affine=True' in norms_src)
+    # E4. Three call sites, not two: ModalityFusion needs it as well, because
+    # fc_fusion's input width is `ngf * mult_max + seq_latent_dim` and mult_max is
+    # fixed at 64 for a 64px image. Miss that one and ngf=32 is a shape error at the
+    # fusion, not a silent no-op.
+    check("E4: ngf reaches both image stacks and the fusion",
+          mm_src.count('ngf=opts.ngf') == 3,
+          f"found {mm_src.count('ngf=opts.ngf')}, expected encoder + decoder + fusion")
+    check("E4: fc_fusion's input width tracks ngf",
+          'ngf * mult_max + seq_latent_dim' in mf_src)
+
+    # E5. The flag is unusable without the projection; assert both the projection and
+    # that the image decoder still sees the *unprojected* latent.
+    check("E5: z_proj is constructed when bottleneck_bits != 512",
+          'nn.Linear(bottleneck_bits, 512) if bottleneck_bits != 512 else None' in mf_src)
+    check("E5: the projection is applied on both the train and the eval branch",
+          mf_src.count('self.z_proj(') == 2)
+    check("E5: z_proj is None at the default, so no state_dict key is added",
+          'else None' in mf_src)
+    check("E5: the image decoder input width tracks bottleneck_bits",
+          'input_nc=opts.bottleneck_bits + opts.char_num' in mm_src)
+    check("E5: the unprojected latent is what leaves modality_fusion",
+          "output['latent'] = z" in mf_src and "output['latent'] = mu" in mf_src)
+
+    # E15. The whole design rests on swap_in/swap_out bracketing every read of the
+    # weights, and on the swaps being balanced.
+    check("E15: WeightEMA is defined", 'class WeightEMA' in train_src)
+    check("E15: the EMA is constructed only when the flag is positive",
+          'WeightEMA(model_main, opts.ema_decay) if opts.ema_decay > 0 else None' in train_src)
+    check("E15: the EMA updates after optimizer.step()",
+          train_src.index('ema.update(model_main)') > train_src.index('optimizer.step()'))
+    check("E15: swap_in and swap_out are balanced",
+          train_src.count('ema.swap_in(model_main)') == train_src.count('ema.swap_out(model_main)') == 2,
+          "one pair around the periodic val, one around the checkpoint save")
+    check("E15: the checkpoint save is inside a swap, so tested weights are the EMA ones",
+          train_src.index('ema.swap_in(model_main)\n            loss_val')
+          < train_src.index('torch.save(')
+          < train_src.rindex('ema.swap_out(model_main)'))
+    check("E15: the shadow is built after --resume, not before",
+          train_src.index('Resumed from') < train_src.index('ema = WeightEMA'))
+    check("E15: bias correction is applied to the decay",
+          'min(self.decay,' in train_src,
+          "without it the first hundreds of steps are dominated by the initialization")
+    check("E15: only floating-point entries are averaged",
+          'v.dtype.is_floating_point' in train_src,
+          "integer buffers such as num_batches_tracked must not be averaged")
+
+    # The defaults, restated as behaviour rather than as values: with every Tier 3 flag
+    # at its default the source paths taken are the released ones.
+    from options import get_parser_main_model
+    d = vars(get_parser_main_model().parse_args([]))
+    check("tier 3 defaults reproduce the released model exactly",
+          d['optimizer'] == 'adam' and d['img_norm'] == 'layer'
+          and d['ema_decay'] == 0.0 and d['bottleneck_bits'] == 512
+          and d['ngf'] == 16 and d['kl_beta'] == 0.01 and d['weight_decay'] == 0.0,
+          "the Tier 1/Tier 2 tables and the seed floor are only valid references "
+          "while this holds")
+
+    # The norm factory, exercised rather than trusted: every channel width that either
+    # image stack constructs at ngf 16 and ngf 32 has to yield a usable group count.
+    #
+    # This block is the only part of section 8 that needs torch, so it degrades to a
+    # loud skip on a machine without it (the Mac side of this project has no torch).
+    # A skip is NOT a pass -- on the cluster, where the batch actually launches, this
+    # must run. The runbook's rung 1 is the backstop either way.
+    sys.path.insert(0, REPO)
+    try:
+        from models.norms import make_img_norm, _group_count
+    except ImportError as exc:                                    # noqa: BLE001
+        print(f"  [SKIP] norm factory construction checks -- {exc}")
+        print("  [SKIP] these are NOT passes. Re-run this script on the cluster.")
+        return
+    for ngf in (16, 32):
+        widths = [ngf] + [ngf * (2 ** (i + 1)) for i in range(6)]
+        for c in widths:
+            g = _group_count(c, 32)
+            if c % g != 0:
+                check(f"E2: group count divides {c} channels (ngf={ngf})", False,
+                      f"got {g} groups for {c} channels")
+                break
+        else:
+            check(f"E2: group counts divide every channel width at ngf={ngf}", True)
+    for kind in ('layer', 'group', 'batch', 'instance'):
+        try:
+            make_img_norm(kind)([16, 64, 64])
+            check(f"E2: --img_norm {kind} constructs", True)
+        except Exception as exc:                                  # noqa: BLE001
+            check(f"E2: --img_norm {kind} constructs", False, str(exc))
+    try:
+        make_img_norm('banana')
+        check("E2: an unknown --img_norm is rejected", False, "it was accepted")
+    except ValueError:
+        check("E2: an unknown --img_norm is rejected", True)
+
+
 def main():
     print("Pre-flight infrastructure checks -- " + REPO)
     check_options()
@@ -473,6 +632,7 @@ def main():
     check_stage2_wiring()
     check_checkpoint_metric()
     check_tier2_wiring()
+    check_tier3_wiring()
 
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed")
     if FAILED:

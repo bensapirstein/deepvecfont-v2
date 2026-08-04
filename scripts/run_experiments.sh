@@ -39,48 +39,103 @@ GPUS=(1 2)
 # One entry per experiment: "name_exp  <extra args appended to COMMON_ARGS>".
 # This is the loop-over-params spot — add/edit lines here for a sweep.
 #
-# Tier 2, 2026-08-04 (PROJECT_PLAN.md §3.5). Eight runs, one seed each, on the
-# breadth-over-depth allocation: cover the whole tier first, deepen whichever
-# candidate leads afterwards. Three GPUs, three waves, ~1 h per run.
+# Tier 3 + multi-seed replication, 2026-08-04 (PROJECT_PLAN.md §3.6, §8 items 2-3).
+# Sixteen runs in two batches. Two GPUs, ~1 h per run, so ~8 h — one overnight.
 #
-# Every entry stays at --seed 1111 and shares COMMON_ARGS with the Tier 1 batch,
-# so each row is comparable to seedfloor_1111_chn (L1 0.1724) on exactly one
-# changed factor. Read the caveat first: the re-measured seed floor is 0.0093 and
-# no Tier 1 candidate cleared it, so a single point here is unlikely to either.
-# The eval-noise decomposition in scripts/eval_noise.sh runs alongside this batch
-# to work out how much of that 0.0093 is decode noise rather than seed noise.
+# The batch is split because the two halves answer different questions and the
+# second is the one that survives a null:
+#
+#   Batch A (10 runs, waves 1-5). Tier 3 breadth, all at --seed 1111, each one
+#   factor off seedfloor_1111_chn. Expect these to land inside the floor, same as
+#   Tier 1 and Tier 2 did; they are in the table for coverage of the assignment's
+#   change categories, not because a single point is expected to resolve.
+#
+#   Batch B (6 runs, waves 6-8). The three largest deltas measured so far, each
+#   re-run at seeds 2222 and 3333 so it has a mean against the baseline's mean
+#   (0.1724 / 0.1631 / 0.1680) rather than a point against a point. §3.2's
+#   decomposition put ~88% of the 0.0093 floor in training-seed variance, so this
+#   is the only lever that can shrink the bar, and it is what §8 item 3 leans to.
+#
+# Run A then B in one go: leave both blocks uncommented and launch parallel. To
+# stop after A, comment out the Batch B block.
 EXPERIMENTS=(
-  # E8, ordinal label smoothing on the argument head. The 128-way cross-entropy
-  # is permutation-invariant in the bin index — predicting bin 5 for a target of
-  # 60 costs what predicting 61 costs — so the head has no notion that coordinates
-  # live on a line. sigma is in bins. sigma=0 is the baseline, not repeated.
-  # Screens on the rendered metric: it changes the cross-entropy scale, so
-  # val_metric is not comparable across these rows (§1.5).
-  "e8_ls05_chn --seed 1111 --args_label_smooth_sigma 0.5"
-  "e8_ls10_chn --seed 1111 --args_label_smooth_sigma 1.0"
-  "e8_ls20_chn --seed 1111 --args_label_smooth_sigma 2.0"
+  # ---- Batch A: Tier 3 breadth ------------------------------------------------
 
-  # E13, quantization. Split into two one-factor runs rather than the one bundled
-  # change §3.5 describes, because bin count and padding_idx are independent and
-  # the protocol is one factor at a time. Gate 2 (the oracle) is deliberately
-  # skipped: it runs after, to explain the result rather than to license it.
-  # Also screens on the rendered metric — 256 bins changes the CE scale too.
-  "e13_bins256_chn --seed 1111 --n_args_bins 256"
-  "e13_nopad_chn --seed 1111 --arg_embed_pad_idx False"
+  # E12, KL weight. kl_beta has always been 0.01 and never tuned. It interacts
+  # with E9 head-on: with a sigma=1.0 additive perturbation already on the encoder
+  # output, the reparameterization trick is close to decorative, so the KL term may
+  # be regularizing something that is already noisy by construction. Bracketed wide
+  # (0 and 10x) rather than sampled finely — nothing in two tiers has resolved at
+  # this scale, so a fine sweep would buy resolution the setup does not have.
+  "e12_kl000_chn --seed 1111 --kl_beta 0.0"
+  "e12_kl100_chn --seed 1111 --kl_beta 0.1"
 
-  # E3, self-refinement decoder depth. Sec. 3.3 says 2 layers, the code clones 1.
-  # This is the decoder whose output is actually scored (§1.1), which is why one
-  # character earns a slot.
-  "e3_refine2_chn --seed 1111 --n_layers_refine 2"
-  "e3_refine3_chn --seed 1111 --n_layers_refine 3"
+  # E11, AdamW. torch.optim.AdamW is imported in train.py and unused. Adam applies
+  # --weight_decay as an L2 term inside the gradient, where the adaptive per-
+  # parameter rate rescales it; AdamW decouples it. At the released weight_decay=0
+  # the two are identical, so this run is the first time the flag does anything.
+  "e11_adamw_chn --seed 1111 --optimizer adamw --weight_decay 0.01"
 
-  # E14, warmup + cosine. ExponentialLR(0.997) over 150 epochs multiplies the lr
-  # by 0.64, so the released schedule is effectively constant at this budget, and
-  # there is no warmup at all. Disproportionately helps short runs, which is what
-  # the entire matrix consists of. If it wins, it applies to every run after it
-  # and the protocol section has to say so.
-  "e14_wucos_chn --seed 1111 --lr_schedule warmup_cosine"
+  # E2, image-stack normalization. The released norm is a spatial LayerNorm over
+  # [C, H, W], which pools channel and spatial statistics together and so discards
+  # per-channel scale. All three alternatives normalize per channel. This is the
+  # assignment's "add normalization layers" bullet done on the image branch, where
+  # E1 did it on the sequence branch.
+  "e2_groupnorm_chn --seed 1111 --img_norm group"
+  "e2_batchnorm_chn --seed 1111 --img_norm batch"
+  "e2_instancenorm_chn --seed 1111 --img_norm instance"
+
+  # E4, width. ngf 16 -> 32 doubles both image encoder and decoder. Unlike every
+  # other row in this batch it changes capacity, so read it as a capacity control
+  # rather than as a like-for-like architectural factor, and say so in the report.
+  "e4_ngf32_chn --seed 1111 --ngf 32"
+
+  # E15, weight EMA. The one candidate here with a reliable prior in the
+  # literature, and the only one that changes nothing about training — the EMA is
+  # evaluated and checkpointed, the optimizer still steps the raw weights. If
+  # anything in Tier 3 clears the floor it is most likely this.
+  "e15_ema999_chn --seed 1111 --ema_decay 0.999"
+
+  # E5, latent width. --bottleneck_bits looked like a free flag and was not: the
+  # latent is written into a 512-wide slot in ModalityFusion, so any other value
+  # crashed until the z_proj projection added 2026-08-04. Bracketed either side of
+  # 512. Note both rows change parameter count in the image decoder too, whose
+  # input_nc is bottleneck_bits + char_num.
+  "e5_bneck256_chn --seed 1111 --bottleneck_bits 256"
+  "e5_bneck1024_chn --seed 1111 --bottleneck_bits 1024"
+
+  # E6 has no row here on purpose. The dead Perceiver cross-attention parameters
+  # are constructed before several live modules, and every construction draws from
+  # the global RNG stream, so deleting them shifts the initialization of everything
+  # after them. A "dead params removed" run is numerically a seed change, and the
+  # seed floor is larger than anything the sweep is chasing, so the run could not
+  # be read either way. It is a reconstruction finding instead:
+  #   python scripts/dead_params.py
+
+  # ---- Batch B: multi-seed replication of the three largest deltas -------------
+  # Seed 1111 is already trained for all three; only 2222 and 3333 are missing.
+  # Deltas vs the seed-1111 baseline at screening: E9 sigma=0.5 -0.0059,
+  # E1 -0.0054, E13 bins256 -0.0050. All roughly half the 0.0093 floor, and
+  # statistically indistinguishable from each other, which is exactly why picking
+  # one would have been arbitrary and all three get the same treatment.
+  "e9_sigma050_2222_chn --seed 2222 --enc_noise_std_train 0.5"
+  "e9_sigma050_3333_chn --seed 3333 --enc_noise_std_train 0.5"
+  "e1_norm_2222_chn --seed 2222 --enc_final_norm True"
+  "e1_norm_3333_chn --seed 3333 --enc_final_norm True"
+  "e13_bins256_2222_chn --seed 2222 --n_args_bins 256"
+  "e13_bins256_3333_chn --seed 3333 --n_args_bins 256"
 )
+
+# Tier 2 batch, 2026-08-04, kept for provenance. Results in §3.5: nothing cleared
+# the 0.0093 floor; E13 bins256 was the largest single delta at -0.0050.
+#   "e8_ls05_chn --seed 1111 --args_label_smooth_sigma 0.5"
+#   "e8_ls10_chn --seed 1111 --args_label_smooth_sigma 1.0"
+#   "e8_ls20_chn --seed 1111 --args_label_smooth_sigma 2.0"
+#   "e13_bins256_chn --seed 1111 --n_args_bins 256"
+#   "e13_nopad_chn --seed 1111 --arg_embed_pad_idx False"
+#   "e3_refine2_chn --seed 1111 --n_layers_refine 2"
+#   "e3_refine3_chn --seed 1111 --n_layers_refine 3"
+#   "e14_wucos_chn --seed 1111 --lr_schedule warmup_cosine"
 
 # Tier 1 batch, 2026-08-03 night, kept for provenance. Re-run under the fixed
 # compute_val_loss (PROJECT_PLAN.md §1.5) after val_metric was found to omit the

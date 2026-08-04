@@ -22,8 +22,9 @@ This document covers both graded stages. It absorbs and replaces `archive/STAGE2
 | Paper metric implemented | Yes, `eval_reconstruction_error.py` |
 | Missing for Stage 1 | SSIM, quantization oracle (renderability, per-font CSV and the bin histogram landed) |
 | Stage 2, Tier 1 | Run and screened 2026-08-04. Nothing cleared the noise floor; see §3.2 |
-| Stage 2, Tier 2 | Run and screened 2026-08-04. Nothing cleared the noise floor either; see §3.5. E8's s-IoU shift (+0.03 to +0.04, L1 flat) is the one candidate observation worth a follow-up |
-| Seed-noise floor | L1 spread **0.0093** (re-measured 2026-08-04). Decomposed 2026-08-04: decode noise 0.0011 (12%), seed variance ~0.0082 (88%) dominates — see §3.2 |
+| Stage 2, Tier 2 | Run and screened 2026-08-04. Nothing cleared the noise floor either; see §3.5. E8's s-IoU shift was flagged as the one follow-up worth budget, then **closed 2026-08-04** without a GPU: it sits at the s-IoU seed floor, not above it |
+| Stage 2, Tier 3 | Coded and staged 2026-08-04. Sixteen runs in two batches — breadth at seed 1111, plus the three largest measured deltas at two more seeds each. Not yet launched; see §3.6 and `docs/tier3-launch.md` |
+| Seed-noise floor | L1 spread **0.0093** (re-measured 2026-08-04). Decomposed 2026-08-04: decode noise 0.0011 (12%), seed variance ~0.0082 (88%) dominates — see §3.2. **s-IoU spread 0.0401** (2026-08-04), roughly three times noisier than L1 in relative terms — see §3.5 |
 
 0.1668 sits essentially on DeepSVG's published Chinese number (0.167), so the baseline is inside the benchmark's range even though it does not reach the paper. §2.4 says how to write that up. It is not a blocker for Stage 2, which is measured against your own baseline rather than against 0.080.
 
@@ -384,6 +385,20 @@ One result worth carrying into the discussion section regardless of the floor: *
 
 Note `e8_ls20_chn` selected `125_5040.ckpt` as its best-val checkpoint rather than `150_6040.ckpt` like every other row — `best_checkpoint.py` picked it from the manifest, not hand-chosen; it is why that row's checkpoint column differs.
 
+**Measured (2026-08-04), and it closes the E8 follow-up without a GPU.** The paragraph above proposed measuring an s-IoU seed-noise floor before deciding whether E8's shift is real. That measurement does not need new runs: the three seed-floor runs were already screened with an s-IoU column, and it was sitting in the re-measured table further up this section.
+
+| Seed | L1 | s-IoU |
+|---|---|---|
+| 1111 | 0.1724 | 0.2154 |
+| 2222 | 0.1631 | 0.2410 |
+| 3333 | 0.1680 | 0.2555 |
+
+**s-IoU seed-noise floor: spread 0.0401.** E8's shift is +0.034 to +0.041 over the 0.2165 baseline — at the floor, not above it. So the one Tier 2 observation flagged as "plausibly real rather than noise" does not survive being measured against the right bar, and the three-seed E8 follow-up that §3.5 called the most promising use of remaining budget is not worth running.
+
+Two things are worth keeping from it anyway. First, s-IoU is a **four times noisier** metric than L1 in relative terms here — 0.0401 on a baseline of ~0.23 is a 17% relative spread, against 0.0093 on ~0.168, which is 5.5%. Any result reported on s-IoU needs that stated, and the §5 results table should carry the s-IoU floor next to the L1 one rather than only the latter. Second, the mechanism proposed for E8 — label smoothing tightening structural overlap without moving pixel disagreement — is still a coherent story; it is just not one this screening setup can evidence. That belongs in the discussion as a hypothesis with its measurement cost stated, not as a finding.
+
+This is also a small methodological lesson worth a sentence in §6: the floor was measured on one metric and then used to judge candidates on a second, which is how the E8 observation came to look stronger than it was.
+
 **E8 — Ordinal label smoothing on the argument head.** *Maps to: modify the loss function, add regularization.*
 
 The 128-way cross-entropy over quantized coordinates is permutation-invariant in the bin index: predicting bin 5 when the target is 60 costs exactly what predicting bin 61 costs. The head has no notion that coordinates live on a line, which is why the Bézier and smoothness losses have to reach back through a temperature-0.1 softmax and a straight-through estimator to recover geometry.
@@ -420,6 +435,25 @@ Add linear warmup over the first ~500 steps and cosine decay to the epoch budget
 
 ### 3.6 Tier 3 — if the budget allows
 
+**Coded and staged 2026-08-04.** Same discipline as Tiers 1 and 2 (§7.2): every new flag's default reproduces the released behaviour, so the Tier 1 table, the Tier 2 table and the seed floor all stay valid references. `check_infra.py` section 8 asserts each flag reaches the model or the optimizer, and asserts the defaults jointly. Runbook: `docs/tier3-launch.md`. New code: `models/norms.py` (E2), `WeightEMA` in `train.py` (E15), `z_proj` in `models/modality_fusion.py` (E5), `scripts/dead_params.py` (E6).
+
+**Scope decision: sixteen runs in two batches, not seven single points.** §8 item 2 framed Tier 3 as competing with multi-seed replication for the same GPU time. Two GPUs at ~1 h per run makes that a false choice at this batch size, so the tier runs as both:
+
+| Batch | Runs | What it is | Expected outcome |
+|---|---|---|---|
+| A | 10 | Tier 3 breadth, seed 1111, one factor each | Null, like Tiers 1 and 2. Reportable as coverage of the assignment's change categories |
+| B | 6 | The three largest measured deltas at seeds 2222 and 3333 | A mean against a mean, which is interpretable whichever way it lands |
+
+Batch A: E12 `kl_beta` ∈ {0, 0.1}, E11 AdamW at `weight_decay` 0.01, E2 `img_norm` ∈ {group, batch, instance}, E4 `ngf` 32, E15 `ema_decay` 0.999, E5 `bottleneck_bits` ∈ {256, 1024}.
+
+Batch B: E9 σ=0.5 (−0.0059), E1 `enc_final_norm` (−0.0054), E13 `n_args_bins=256` (−0.0050), each at two additional seeds. Those three are the largest deltas measured across both tiers and are indistinguishable from each other at this resolution, which is why picking one to deepen would have been arbitrary. §3.2's decomposition put ~88% of the 0.0093 floor in seed variance, so this is the only lever that shrinks the bar, and Batch B is the half to protect if the night is cut short.
+
+**Batch B is not read against the 0.0093 floor.** That number is the baseline's own spread across seeds and is the quantity being replaced. Read it as baseline mean and spread against candidate mean and spread, plus the paired per-seed difference, since the seeds are matched. A candidate whose three per-seed differences share a sign earns the confirmation eval even if the means overlap — a statement neither earlier tier could support.
+
+**E6 is an audit, not a run, and the reason is worth stating.** The dead Perceiver parameters are constructed before several live modules, and every `nn.Linear` and `nn.Parameter` construction draws from the global RNG stream, so deleting them shifts the initialization of everything built afterwards. A "dead parameters removed" run therefore differs from baseline by an effective seed change, and the seed floor exceeds any effect in play, so it could not be read in either direction. `python scripts/dead_params.py` produces the count for §1.4 instead.
+
+**E4 is a capacity control, not a like-for-like factor.** `ngf` 16 → 32 doubles both image stacks, so unlike every other row in the batch it changes parameter count. Report it as the capacity axis rather than folding it in with the architectural factors.
+
 | ID | Change | Maps to | Note |
 |---|---|---|---|
 | E5 | `bottleneck_bits` ∈ {128, 256, 512, 1024} | change the latent dimension | Gotcha below |
@@ -431,6 +465,8 @@ Add linear warmup over the first ~500 steps and cosine decay to the epoch budget
 | E6 | Delete or wire the dead Perceiver cross-attention path | change the encoder | See §1.4 |
 
 **E5 gotcha.** `--bottleneck_bits` looks like a free flag and is not. `ModalityFusion` does `seq_feat_[:, 0] = z`, and `seq_feat_` has last dimension 512 fixed by `fc_merge = nn.Linear(seq_latent_dim * ref_nshot, 512)`. Any `bottleneck_bits ≠ 512` fails there. Add a `nn.Linear(bottleneck_bits, 512)` projection before the assignment. Small, but it is a code change rather than a flag flip, so budget for it.
+
+**Resolved 2026-08-04.** `z_proj` added, constructed only when `bottleneck_bits != 512` so the default adds no module and no state_dict key. Only the sequence-side slot is projected; the image decoder keeps receiving the unprojected latent, since its `input_nc` is `bottleneck_bits + char_num` and already tracks the flag. Worth noting for the report that the released code has therefore never run at any other latent width — the flag was declared, documented, and unusable.
 
 **E6 note.** Deleting the dead parameters is a clean finding for the reconstruction section and slightly reduces optimizer state. Wiring the cross-attention to the image features is a real architecture change and belongs here only if everything else is done.
 
@@ -582,8 +618,8 @@ Three rungs, cheapest first. Do not skip a rung.
 These are yours. The plan does not commit to them.
 
 1. ~~**Tier 2 scope.**~~ **Resolved 2026-08-04: all four, one seed each, eight runs.** ~1 h per run puts this in §3.3's ≤3 h band, so nothing needed cutting. Breadth over depth for the first pass — deepen whichever candidate leads rather than guessing which one deserves three seeds up front. E13 runs without waiting on its oracle gate; see §3.5.
-2. **Tier 3 at all.** Day 9 is the only slot, and dropping it buys back the report time §4 flags as tight. **Live again as of 2026-08-04**, and now competing with one better use of the same GPU time: re-running the leading Tier 2 candidate at three seeds so it has a mean rather than a point. (The other candidate use, re-screening at larger `n_samples`, is now ruled out — §3.2's decomposition puts decode noise at 12% of the floor, so it would not buy much.) Tier 3 adds seven more single points to a table where single points have so far proven unresolvable.
-3. **The screening bar itself. Resolved 2026-08-04, decomposed but not yet acted on.** `eval_noise.sh` puts decode noise at 0.0011 and seed noise at ~0.0082 of the 0.0093 floor — seed variance dominates, so raising `n_samples` will not shrink the bar. The only remaining lever is running candidates at multiple seeds, a 3× training matrix. Whether to spend that budget, and on which candidate(s), is still open — leaning toward doing it for whichever Tier 2 candidate leads (ties into item 2) rather than the full matrix.
+2. ~~**Tier 3 at all.**~~ **Resolved 2026-08-04: both, in one batch.** The item framed Tier 3 as competing with multi-seed replication for the same slot. At two GPUs and ~1 h per run, sixteen runs is one overnight, so the tier runs as Batch A (breadth, 10 runs) plus Batch B (the three largest deltas at two more seeds each, 6 runs). See §3.6. Batch B is the half to protect if the night is cut short, because it is the one that yields an interpretable number under a null.
+3. ~~**The screening bar itself.**~~ **Resolved and acted on 2026-08-04.** `eval_noise.sh` puts decode noise at 0.0011 and seed noise at ~0.0082 of the 0.0093 floor, so raising `n_samples` will not shrink the bar and multiple seeds is the only lever. Acted on as Batch B in §3.6: three candidates × two additional seeds, chosen as the three largest measured deltas rather than one arbitrary leader, since at this resolution they are indistinguishable from each other. Separately, the **s-IoU** floor is now measured at 0.0401 from the existing seed-floor runs (§3.5) — s-IoU is roughly three times noisier than L1 in relative terms, and the §5 table needs both floors, not just the L1 one.
 4. **English.** Currently out of scope. It is a second language column in the results table and a stronger reconstruction section, against roughly a day. Days 3 to 5 came free (§4), so this is more affordable than it was.
 5. ~~**Screening budget.**~~ **Resolved 2026-08-03: 150 epochs everywhere.** Superseded in part by item 3 — the open question is no longer epochs but `n_samples`, and §3.2's decomposition answers it.
 6. ~~**Fix the §1.5 eval-script issue.**~~ **Resolved 2026-08-03**, layout is per-checkpoint and the script handles both.

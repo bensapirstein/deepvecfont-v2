@@ -20,7 +20,15 @@ class ModalityFusion(nn.Module):
         self.fc_merge = nn.Linear(seq_latent_dim * opts.ref_nshot, 512)
         n_downsampling = int(math.log(img_size, 2))
         mult_max = 2 ** (n_downsampling)
-        self.fc_fusion = nn.Linear(ngf * mult_max + seq_latent_dim, opts.bottleneck_bits * 2, bias=True) # the max multiplier for img feat channels is 
+        self.fc_fusion = nn.Linear(ngf * mult_max + seq_latent_dim, opts.bottleneck_bits * 2, bias=True) # the max multiplier for img feat channels is
+
+        # E5. The latent is written into slot 0 of the merged sequence feature below
+        # (`seq_feat_[:, 0] = z`), and that tensor's last dimension is fixed at 512 by
+        # fc_merge. So --bottleneck_bits is not the free flag it looks like: any value
+        # other than 512 raises a shape error there, which is why the released code has
+        # only ever run at 512. Project when the two disagree, and stay an exact no-op
+        # -- no module, no state_dict key -- when they do not.
+        self.z_proj = nn.Linear(bottleneck_bits, 512) if bottleneck_bits != 512 else None
 
     def forward(self, seq_feat, img_feat, ref_pad_mask=None):
 
@@ -47,15 +55,18 @@ class ModalityFusion(nn.Module):
             epsilon = torch.randn(*mu.size(), device=mu.device)
             z = mu + torch.exp(log_sigma / 2) * epsilon
             kl = 0.5 * torch.mean(torch.exp(log_sigma) + torch.square(mu) - 1. - log_sigma)
+            # E5: the unprojected latent goes to the image decoder, whose input_nc is
+            # bottleneck_bits + char_num and therefore already tracks the flag. Only the
+            # sequence-side slot needs the 512-wide projection.
             output['latent'] = z
             output['kl_loss'] = kl
-            seq_feat_[:, 0] = z
+            seq_feat_[:, 0] = self.z_proj(z) if self.z_proj is not None else z
             latent_feat_seq = seq_feat_
 
         else:
             output['latent'] = mu
             output['kl_loss'] = 0.0
-            seq_feat_[:, 0] = mu
+            seq_feat_[:, 0] = self.z_proj(mu) if self.z_proj is not None else mu
             latent_feat_seq = seq_feat_
 
         

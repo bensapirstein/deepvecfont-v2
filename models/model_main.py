@@ -1,6 +1,7 @@
 from .image_encoder import ImageEncoder
 from .image_decoder import ImageDecoder
 from .modality_fusion import ModalityFusion
+from .norms import make_img_norm
 from .vgg_perceptual_loss import VGGPerceptualLoss
 from .transformers import *
 from torch.autograd import Variable
@@ -10,8 +11,12 @@ class ModelMain(nn.Module):
     def __init__(self, opts, mode='train'):
         super().__init__()
         self.opts = opts
-        self.img_encoder = ImageEncoder(img_size=opts.img_size, input_nc=opts.ref_nshot, ngf=opts.ngf, norm_layer=nn.LayerNorm)
-        self.img_decoder = ImageDecoder(img_size=opts.img_size, input_nc=opts.bottleneck_bits + opts.char_num, output_nc=1, ngf=opts.ngf, norm_layer=nn.LayerNorm)
+        # E2. 'layer' returns nn.LayerNorm unchanged, so the default is the released
+        # model exactly. Both stacks call norm_layer([C, H, W]); see models/norms.py.
+        img_norm = make_img_norm(getattr(opts, 'img_norm', 'layer'),
+                                 getattr(opts, 'img_norm_groups', 32))
+        self.img_encoder = ImageEncoder(img_size=opts.img_size, input_nc=opts.ref_nshot, ngf=opts.ngf, norm_layer=img_norm)
+        self.img_decoder = ImageDecoder(img_size=opts.img_size, input_nc=opts.bottleneck_bits + opts.char_num, output_nc=1, ngf=opts.ngf, norm_layer=img_norm)
         self.vggptlossfunc = VGGPerceptualLoss()
         self.modality_fusion = ModalityFusion(img_size=opts.img_size, ref_nshot=opts.ref_nshot, bottleneck_bits=opts.bottleneck_bits, ngf=opts.ngf, mode=opts.mode)
         self.transformer_main = Transformer(

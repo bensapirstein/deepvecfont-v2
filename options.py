@@ -97,4 +97,20 @@ def get_parser_main_model():
     parser.add_argument('--lr_warmup_steps', type=int, default=500, help='[E14] linear warmup length in optimizer steps; only read when --lr_schedule warmup_cosine')
     parser.add_argument('--lr_min_factor', type=float, default=0.05, help='[E14] floor of the cosine decay as a fraction of --lr; only read when --lr_schedule warmup_cosine')
 
+    # Tier 3 experiment flags. Wired 2026-08-04, same discipline again: every default
+    # reproduces the released behaviour, so the Tier 1 and Tier 2 tables and the seed
+    # floor all stay valid references. See PROJECT_PLAN.md 3.6.
+    #   kl_beta          -> train.py loss sum                      (E12, pre-existing flag)
+    #   ngf              -> image_encoder / image_decoder widths   (E4,  pre-existing flag)
+    #   bottleneck_bits  -> modality_fusion + image_decoder        (E5,  pre-existing flag,
+    #                       needs the z_proj added in this commit to be usable at all)
+    #   optimizer        -> train.py                               (E11)
+    #   img_norm         -> models/norms.py -> model_main.py       (E2)
+    #   ema_decay        -> train.py                               (E15)
+    parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'adamw'], help='[E11] adam is the original torch.optim.Adam, where --weight_decay is L2-in-the-gradient and interacts with the adaptive scale; adamw decouples it. AdamW is already imported in train.py and unused')
+    parser.add_argument('--img_norm', type=str, default='layer', choices=['layer', 'group', 'batch', 'instance'], help="[E2] normalization in the image encoder and decoder. 'layer' is the original spatial LayerNorm([C,H,W]), which couples channel and spatial statistics and discards per-channel scale; the other three normalize per channel")
+    parser.add_argument('--img_norm_groups', type=int, default=32, help='[E2] target group count for --img_norm group; halved automatically until it divides the channel count, so the ngf-wide first layer still constructs')
+    parser.add_argument('--ema_decay', type=float, default=0.0, help='[E15] decay of an exponential moving average of the weights, evaluated and checkpointed in place of the raw weights. 0 disables it and keeps the original behaviour; 0.999 is the usual value')
+    parser.add_argument('--ema_warmup_steps', type=int, default=0, help='[E15] steps before the EMA starts tracking; the shadow is initialized from the weights, so 0 is fine and this exists only for the record')
+
     return parser
