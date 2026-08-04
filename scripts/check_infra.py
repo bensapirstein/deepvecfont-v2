@@ -313,6 +313,38 @@ def check_stage2_wiring():
           'attn_dropout = 0.,' not in mm_src)
 
 
+def check_checkpoint_metric():
+    """Static check that checkpoint selection covers what test-time scoring uses.
+
+    test_few_shot.py scores sampled_svg_2, which comes from the parallel/refinement
+    decoder (loss_dict['svg_para']). compute_val_loss used to declare svg_para
+    accumulators and never fill them, so val_metric silently selected checkpoints on the
+    sequential decoder alone. Fixed 2026-08-03; see checkpoint_log.py.
+    """
+    print("\n6. checkpoint metric wiring [static, source]")
+
+    with open(os.path.join(REPO, 'train.py')) as fh:
+        train_src = fh.read()
+
+    check("compute_val_loss accumulates svg_para, not just img/svg",
+          "for loss_cat in ['img', 'svg', 'svg_para']:" in train_src)
+    check("val_metric includes the svg_para (refinement decoder) term",
+          "loss_val['svg_para']['total']" in train_src)
+    check("checkpoint filenames no longer embed val_metric",
+          "valloss" not in train_src)
+    check("checkpoint saves append to the checkpoint_log manifest",
+          "checkpoint_log.append(" in train_src)
+    check("prune_checkpoints selects from the manifest, not a filename regex",
+          "checkpoint_log.read_all(dir_log)" in train_src)
+
+    if not os.path.exists(os.path.join(REPO, 'checkpoint_log.py')):
+        check("checkpoint_log.py exists", False)
+    else:
+        import checkpoint_log
+        check("checkpoint_log.best_checkpoint_file is importable",
+              callable(getattr(checkpoint_log, 'best_checkpoint_file', None)))
+
+
 def main():
     print("Pre-flight infrastructure checks -- " + REPO)
     check_options()
@@ -320,6 +352,7 @@ def main():
     check_train_source()
     check_wandb_roundtrip()
     check_stage2_wiring()
+    check_checkpoint_metric()
 
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed")
     if FAILED:

@@ -33,8 +33,10 @@ conda activate dvf_v2
 python scripts/check_infra.py
 ```
 
-Expect **69 passed, 0 failed** (68 plus the wandb round-trip, which skips on the Mac and
-runs on the cluster). Do not launch on a failure in section 5.
+Expect **82 passed, 0 failed** (81 plus the wandb round-trip, which skips on the Mac and
+runs on the cluster). That count went up from 69 on 2026-08-03: a section 6 was added
+covering the `val_metric` checkpoint-selection fix (see §1.4 in `PROJECT_PLAN.md` — it was
+missing the refinement-decoder loss). Do not launch on a failure in section 5 or 6.
 
 ---
 

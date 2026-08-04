@@ -93,6 +93,10 @@ The script now detects both layouts, accepts `--name_ckpt` to disambiguate when 
 
 **`val_metric` is not comparable across candidates that change the loss.** `compute_val_loss` builds it as `loss_w_l1 · img_l1 + loss_w_pt_c · vggpt + svg_total`, and the checkpoint filename embeds it. Any candidate that alters the cross-entropy itself changes what the number means, and `prune_checkpoints` will then be selecting on a different quantity. E8 and E13 are the two affected candidates; §3.2 handles them.
 
+**Fixed (2026-08-03): `val_metric` was also missing the refinement decoder's loss entirely, independent of the E8/E13 issue above.** `test_few_shot.py` scores `sampled_svg_2`, which comes from the parallel/refinement decoder (`loss_dict['svg_para']`), not the teacher-forced sequential one (`loss_dict['svg']`). `compute_val_loss` declared `loss_val['svg_para']` accumulators but its accumulate/average loops only ever iterated `['img', 'svg']`, so `svg_para` stayed at its zero initializer forever and never reached `val_metric`. Checkpoint selection was therefore blind to the exact decoder pass that produces the scored SVGs. `val_metric` now is `loss_w_l1 · img_l1 + loss_w_pt_c · vggpt + svg_total + svg_para_total`. This changes its scale, so it is not comparable to any `val_metric`/embedded-filename number recorded before this date (the seed-floor and baseline figures elsewhere in this doc are L1/s-IoU from rendered output, not `val_metric`, so they are unaffected).
+
+Checkpoint filenames also no longer embed the metric (`{epoch}_{step}.ckpt`, not `..._valloss{x}.ckpt`). Every checkpoint save now appends a row (`epoch, step, checkpoint, val_metric`, and the l1/vggpt/svg/svg_para breakdown) to `experiments/<name>/logs/checkpoint_metrics.csv`, and `prune_checkpoints` / `scripts/test_experiments.sh` select the best checkpoint from that manifest instead of parsing a filename. `scripts/best_checkpoint.py` (via `checkpoint_log.py`) falls back to the legacy filename-embedded score for experiment dirs trained before this fix (baseline, the three seedfloor runs), so those don't need retraining. See `checkpoint_log.py`.
+
 **`.gitignore` has `experiments/` with a trailing slash**, which does not match a symlink. `COMMANDS.md` describes the entry as slash-less. Both `data` and `experiments` are symlinks on the cluster, repointed to `/data/bens/deepvecfont-v2` on 2026-08-03, so the current pattern will not ignore them. One character, worth fixing before the first `git add`. `COMMANDS.md` line 10 still describes the old `~/gpufs` target and needs the same correction.
 
 **Renderability is silently rewarded.** `test_few_shot.py` wraps `render()` in a bare `except: continue`, and `eval_reconstruction_error.py` then skips any font whose merge HTML lacks exactly `2 × char_num` SVGs. A model that fails on hard glyphs currently gets those fonts dropped from its average. §2.2 turns this into a reported quantity.
@@ -219,6 +223,33 @@ The flow-matching coordinate head in `archive/FLOW_MATCHING_PLAN.md` was the alt
 | 3333 | `100_4040_valloss4.0104.ckpt` | 0.1694 | 0.1913 |
 
 **Seed-noise floor: L1 spread = 0.0077.** Any Stage 2 candidate's improvement over this baseline needs to clear ~0.008 in L1 to be a result rather than noise. All three fonts sets rendered fully (34/34 fonts, 1768/1768 glyphs, 0 skipped).
+
+**Re-measured (2026-08-04), after the `val_metric` fix below.** `compute_val_loss` was missing the refinement-decoder loss (`svg_para`) from `val_metric` entirely — see the fixed note further down this section. Because that bug predates every run trained so far, it could have affected which checkpoint `prune_checkpoints` kept as "best" for *any* of them, baseline included, not just Stage-2 candidates. The three seed-floor runs and the three E7 runs were re-trained from scratch under the fix (old dirs preserved at `experiments/archive_pre_metricfix/`, not deleted) and re-screened with `scripts/test_experiments.sh`:
+
+| Seed | Checkpoint | L1 | s-IoU |
+|---|---|---|---|
+| 1111 | `150_6040.ckpt` | 0.1724 | 0.2154 |
+| 2222 | `150_6040.ckpt` | 0.1631 | 0.2410 |
+| 3333 | `150_6040.ckpt` | 0.1680 | 0.2555 |
+
+**New spread: L1 = 0.0093 — larger than the 0.008 bar, not smaller.** Confirmed cause, not guessed: comparing `logs/checkpoint_metrics.csv` (new, corrected `val_metric`) against the archived runs' filenames (old, `svg_para`-blind `val_metric`) shows the fix changed which checkpoint was selected as best for seed 3333 specifically — old picked epoch 100 (`100_4040_valloss4.0104.ckpt`, lower on the broken metric), new picks epoch 150 (`val_metric` 5.894603 at epoch 150 vs 5.905838 at epoch 100, a difference of 0.011 that only appears once `svg_para` is counted). Seeds 1111 and 2222 picked epoch 150 under *both* the old and new metric, yet their L1 still moved by ~0.001-0.003 on re-run — `test_few_shot.py` does stochastic best-of-`n_samples` decoding, so even a fixed checkpoint isn't bit-for-bit reproducible across two screening runs. The 0.0016 spread increase is therefore a mix of both effects, not attributable to either alone, but the checkpoint-selection change for seed 3333 is the one piece that's directly verifiable from the manifest rather than inferred.
+
+**Consequence for Tier 1 (§3.4): re-screened under the fix, nothing clears the new bar.** E7 (`loss_w_aux` ∈ {0.1, 0.3, 1.0}), E9 (`enc_noise_std_train` ∈ {0, 0.1, 0.25, 0.5}), E10 (`dropout` ∈ {0.1, 0.2}) and E1 (`enc_final_norm`) were all re-trained and re-screened in the same batch. Every candidate's delta from the seed-1111 baseline falls within ±0.006 L1 — smaller than the 0.0093 noise floor itself:
+
+| Candidate | L1 | s-IoU | delta vs seed 1111 |
+|---|---|---|---|
+| E7 `loss_w_aux=0.1` | 0.1679 | 0.2263 | −0.0045 |
+| E7 `loss_w_aux=0.3` | 0.1702 | 0.2307 | −0.0022 |
+| E7 `loss_w_aux=1.0` | 0.1746 | 0.2234 | +0.0022 |
+| E9 σ=0 | 0.1740 | 0.2470 | +0.0016 |
+| E9 σ=0.1 | 0.1696 | 0.2273 | −0.0028 |
+| E9 σ=0.25 | 0.1720 | 0.2538 | −0.0004 |
+| E9 σ=0.5 | 0.1665 | 0.2522 | −0.0059 |
+| E10 dropout=0.1 | 0.1724 | 0.2376 | +0.0000 |
+| E10 dropout=0.2 | 0.1722 | 0.2081 | −0.0002 |
+| E1 `enc_final_norm` | 0.1670 | 0.2101 | −0.0054 |
+
+Renderability was 100% (1768/1768) for every row, so nothing here is confounded by the renderability caveat in §1.5. **This is itself the Tier 1 result: none of E7/E9/E10/E1 individually clear a noise floor that grew past the bar meant to screen them.** Two live implications for §3.5-§3.7 and the report: (1) don't spend more budget re-running Tier 1 single-factor points expecting a different sign, the effect sizes here are smaller than what this screening setup can resolve; (2) either the screening budget (`n_samples 3`, 60-epoch option in §3.3) needs to grow to shrink the noise floor below 0.008, or the bar itself needs revisiting — both are §8 decisions, not something to silently paper over in the results table.
 
 **Screen cheap, confirm expensive.** Do not run `test_few_shot.py --n_samples 50` over all 34 test fonts for every candidate.
 
@@ -376,6 +407,13 @@ English is out of scope unless days 9 to 11 come in early. If it fits, run only 
 ## 5. Results table
 
 One row per candidate, so the sweep itself is the evidence.
+
+**Not filled in yet, on purpose.** This table is confirmation-budget numbers (`n_samples
+50`, all 34 fonts) for finalists only, per §3.2's "screen cheap, confirm expensive" split.
+Tier 1's screening-budget numbers (`n_samples 3`) are in §3.2's "Re-measured (2026-08-04)"
+block instead, and none of E7/E9/E10/E1 cleared the noise floor there — so none of them
+are finalists yet, and promoting one to a confirmation run isn't justified by what's
+measured so far. Fill this table once §3.5-§3.8 produce a candidate that does.
 
 | Row | Error ↓ | SSIM ↑ | s-IoU ↑ | Render % | Wilcoxon p |
 |---|---|---|---|---|---|

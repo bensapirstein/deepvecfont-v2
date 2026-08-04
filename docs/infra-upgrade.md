@@ -56,6 +56,17 @@ Two additions beyond a strict mirror, both one line, both easy to revert:
   selects on, and `PROJECT_PLAN.md` §3.2 needs it to test whether `val_metric` predicts the
   rendered test metric. Without it, that correlation has to be scraped out of checkpoint filenames.
 
+**Update, 2026-08-03: `val_metric` no longer lives in the filename, and it was fixed at the
+same time.** `compute_val_loss` was silently dropping the refinement-decoder loss
+(`svg_para`) out of `val_metric` even though that decoder produces what `test_few_shot.py`
+scores — see `PROJECT_PLAN.md` §1.4's fixed note. Checkpoints are now named plain
+`{epoch}_{step}.ckpt`, and every save appends its metrics to
+`experiments/<name>/logs/checkpoint_metrics.csv` (`checkpoint_log.py`). `prune_checkpoints`
+and `scripts/test_experiments.sh` (via `scripts/best_checkpoint.py`) both select the best
+checkpoint from that manifest, so there is one selection code path instead of two things
+that can drift apart. Pre-fix experiment dirs (no manifest) still resolve via the old
+filename-embedded score.
+
 **Degradation.** The import is wrapped in `try/except ImportError`. If wandb is missing, the run
 prints a warning and continues on TensorboardX alone. If `--wandb False`, no wandb code runs.
 Every `wandb.*` call site sits behind `if use_wandb`, verified statically by the check script.

@@ -1,6 +1,5 @@
 import os
 import random
-import re
 import numpy as np
 import shutil
 import torch
@@ -14,6 +13,7 @@ from models import util_funcs
 from models.model_main import ModelMain
 from options import get_parser_main_model
 from data_utils.svg_utils import render
+import checkpoint_log
 
 try:
     import wandb
@@ -27,8 +27,6 @@ def setup_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
-CKPT_RE = re.compile(r'^(\d+)_(\d+)(?:_valloss([\d.]+))?\.ckpt$')
-
 def compute_val_loss(model_main, val_loader, opts):
     loss_val = {'img':{'l1':0.0, 'vggpt':0.0}, 'svg':{'total':0.0, 'cmd':0.0, 'args':0.0, 'aux':0.0},
                 'svg_para':{'total':0.0, 'cmd':0.0, 'args':0.0, 'aux':0.0}}
@@ -37,33 +35,33 @@ def compute_val_loss(model_main, val_loader, opts):
         for val_data in val_loader:
             for key in val_data: val_data[key] = val_data[key].cuda()
             ret_dict_val, loss_dict_val = model_main(val_data, mode='val')
-            for loss_cat in ['img', 'svg']:
+            for loss_cat in ['img', 'svg', 'svg_para']:
                 for key, _ in loss_val[loss_cat].items():
                     loss_val[loss_cat][key] += loss_dict_val[loss_cat][key]
         model_main.train()
 
-    for loss_cat in ['img', 'svg']:
+    for loss_cat in ['img', 'svg', 'svg_para']:
         for key, _ in loss_val[loss_cat].items():
             loss_val[loss_cat][key] /= len(val_loader)
 
-    val_metric = float(opts.loss_w_l1 * loss_val['img']['l1'] + opts.loss_w_pt_c * loss_val['img']['vggpt'] + loss_val['svg']['total'])
+    # svg_para is the parallel/refinement decoder's loss. test_few_shot.py scores
+    # sampled_svg_2, which comes from that decoder (not the teacher-forced `svg` one), so a
+    # selection metric that omits it can prefer a checkpoint that isn't the one that will
+    # actually score best at test time. Include both, matching the training objective.
+    val_metric = float(opts.loss_w_l1 * loss_val['img']['l1'] + opts.loss_w_pt_c * loss_val['img']['vggpt']
+                        + loss_val['svg']['total'] + loss_val['svg_para']['total'])
     return loss_val, val_metric
 
-def prune_checkpoints(dir_ckpt, latest_path, max_keep):
-    """Keep the max_keep checkpoints with the lowest embedded val loss, plus latest_path."""
-    entries = []
-    for fname in os.listdir(dir_ckpt):
-        m = CKPT_RE.match(fname)
-        if not m:
-            continue
-        val_loss = float(m.group(3)) if m.group(3) is not None else float('inf')
-        entries.append((val_loss, os.path.join(dir_ckpt, fname)))
-
+def prune_checkpoints(dir_ckpt, dir_log, latest_path, max_keep):
+    """Keep the max_keep checkpoints with the lowest logged val_metric, plus latest_path."""
+    ranked = sorted(checkpoint_log.read_all(dir_log), key=lambda r: float(r['val_metric']))
     keep = {latest_path}
-    entries.sort(key=lambda e: e[0])
-    keep.update(path for _, path in entries[:max_keep])
+    keep.update(os.path.join(dir_ckpt, r['checkpoint']) for r in ranked[:max_keep])
 
-    for _, path in entries:
+    for fname in os.listdir(dir_ckpt):
+        if not fname.endswith('.ckpt'):
+            continue
+        path = os.path.join(dir_ckpt, fname)
         if path not in keep and os.path.exists(path):
             os.remove(path)
 
@@ -183,13 +181,14 @@ def train_main_model(opts):
                 loss_val, last_val_metric = compute_val_loss(model_main, val_loader, opts)
 
                 if opts.tboard:
-                    for loss_cat in ['img', 'svg']:
+                    for loss_cat in ['img', 'svg', 'svg_para']:
                         for key, _ in loss_val[loss_cat].items():
                             writer.add_scalar(f'VAL/loss_{loss_cat}_{key}', loss_val[loss_cat][key], batches_done)
+                    writer.add_scalar('VAL/val_metric', last_val_metric, batches_done)
 
                 if use_wandb:
                     wandb_val_log = {f'VAL/loss_{loss_cat}_{key}': float(loss_val[loss_cat][key])
-                                     for loss_cat in ['img', 'svg']
+                                     for loss_cat in ['img', 'svg', 'svg_para']
                                      for key in loss_val[loss_cat]}
                     wandb_val_log['VAL/val_metric'] = last_val_metric
                     wandb.log(wandb_val_log, step=batches_done)
@@ -201,6 +200,8 @@ def train_main_model(opts):
                     f"Val loss total: {loss_val['svg']['total']: .6f}, "
                     f"Val loss cmd: {loss_val['svg']['cmd']: .6f}, "
                     f"Val loss args: {loss_val['svg']['args']: .6f}, "
+                    f"Val loss para total: {loss_val['svg_para']['total']: .6f}, "
+                    f"Val metric: {last_val_metric: .6f}, "
                 )
 
                 logfile_val.write(val_msg + "\n")
@@ -210,19 +211,21 @@ def train_main_model(opts):
         scheduler.step()
 
         if epoch % opts.freq_ckpt == 0:
-            _, last_val_metric = compute_val_loss(model_main, val_loader, opts)
-            ckpt_name = f'{epoch}_{batches_done}_valloss{last_val_metric:.4f}.ckpt'
+            loss_val, last_val_metric = compute_val_loss(model_main, val_loader, opts)
+            ckpt_name = f'{epoch}_{batches_done}.ckpt'
             ckpt_path = os.path.join(dir_ckpt, ckpt_name)
             if opts.multi_gpu:
                 torch.save({'model':model_main.module.state_dict(), 'opt':optimizer.state_dict(), 'n_epoch':epoch, 'n_iter':batches_done}, ckpt_path)
             else:
                 torch.save({'model':model_main.state_dict(), 'opt':optimizer.state_dict(), 'n_epoch':epoch, 'n_iter':batches_done}, ckpt_path)
 
+            checkpoint_log.append(dir_log, epoch, batches_done, ckpt_name, last_val_metric, loss_val)
+
             if use_wandb:
                 wandb.log({'CKPT/val_metric': last_val_metric, 'CKPT/epoch': epoch}, step=batches_done)
 
             if opts.max_ckpt_keep > 0:
-                prune_checkpoints(dir_ckpt, ckpt_path, opts.max_ckpt_keep)
+                prune_checkpoints(dir_ckpt, dir_log, ckpt_path, opts.max_ckpt_keep)
 
     logfile_train.close()
     logfile_val.close()
