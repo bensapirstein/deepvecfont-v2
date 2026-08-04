@@ -481,10 +481,49 @@ def check_checkpoint_metric():
 
     if not os.path.exists(os.path.join(REPO, 'checkpoint_log.py')):
         check("checkpoint_log.py exists", False)
-    else:
-        import checkpoint_log
-        check("checkpoint_log.best_checkpoint_file is importable",
-              callable(getattr(checkpoint_log, 'best_checkpoint_file', None)))
+        return
+
+    import checkpoint_log
+    check("checkpoint_log.best_checkpoint_file is importable",
+          callable(getattr(checkpoint_log, 'best_checkpoint_file', None)))
+
+    # MANIFEST_FIELDS grew on 2026-08-04 (val_svg_aux, for the E7 scale problem).
+    # A run in flight is appending to a manifest written under the old header, and
+    # writing the wider row under it would shift every column silently. Exercised
+    # rather than reasoned about, because a corrupted manifest breaks checkpoint
+    # selection for the run that is producing it.
+    check("manifest records the aux term separately (E7 rescaling)",
+          'val_svg_aux' in checkpoint_log.MANIFEST_FIELDS)
+
+    import csv as _csv
+    import tempfile as _tf
+    loss_val = {'img': {'l1': 1.0, 'vggpt': 2.0},
+                'svg': {'total': 3.0, 'cmd': 1.0, 'args': 1.0, 'aux': 0.5},
+                'svg_para': {'total': 4.0, 'cmd': 1.0, 'args': 1.0, 'aux': 0.7}}
+    old_header = ['epoch', 'step', 'checkpoint', 'val_metric', 'val_l1', 'val_vggpt',
+                  'val_svg_total', 'val_svg_para_total']
+    with _tf.TemporaryDirectory() as d:
+        p = checkpoint_log.manifest_path(d)
+        with open(p, 'w', newline='') as fh:
+            w = _csv.writer(fh)
+            w.writerow(old_header)
+            w.writerow([100, 4040, '100_4040.ckpt', '6.100000', '1', '2', '3', '4'])
+        checkpoint_log.append(d, 125, 5040, '125_5040.ckpt', 5.9, loss_val)
+        rows = list(_csv.DictReader(open(p, newline='')))
+        check("appending to a pre-2026-08-04 manifest does not shift its columns",
+              all(len(r) == len(old_header) for r in rows),
+              f"row widths {[len(r) for r in rows]} against an {len(old_header)}-column header")
+        best = checkpoint_log.best_row(d)
+        check("selection still works on a mixed-vintage manifest",
+              best is not None and best['checkpoint'] == '125_5040.ckpt')
+
+    with _tf.TemporaryDirectory() as d:
+        checkpoint_log.append(d, 150, 6040, '150_6040.ckpt', 5.5, loss_val)
+        with open(checkpoint_log.manifest_path(d), newline='') as fh:
+            header = next(_csv.reader(fh))
+        check("a fresh manifest gets the full schema",
+              header == checkpoint_log.MANIFEST_FIELDS,
+              f"got {header}")
 
 
 def check_tier3_wiring():

@@ -289,6 +289,35 @@ There is a specific mechanism that would make E14 the one candidate where the pr
 
 E14 also bundles two factors — warmup and decay shape — which breaks the one-at-a-time rule the rest of the sweep follows. Both are separable with existing flags: `--lr_min_factor 1.0` collapses the cosine to a constant and gives warmup only, `--lr_warmup_steps 1` gives cosine only. The E14-deep block in `scripts/run_experiments.sh` stages all of this, gated on the correlation result.
 
+**Audited 2026-08-04: which other candidates could fall through the same gap.** E14 prompted a sweep of every candidate against what `val_metric` actually measures. It is, from `train.py`:
+
+```
+val_metric = loss_w_l1*img_l1 + loss_w_pt_c*vggpt + svg['total'] + svg_para['total']
+svg['total'] = loss_w_cmd*cmd + loss_w_args*args + loss_w_aux*aux + loss_w_smt*smt
+```
+
+Three distinct failure modes fall out, and each hits different candidates.
+
+**(a) Loss-scale changers — `val_metric` not comparable across runs at all.** E8 and E13 were already known and excluded. **E7 was not, and should have been:** `loss_w_aux` is a weight *inside the sum that val_metric is*, appearing twice (via `svg` and `svg_para`), and the sweep spans 0.01 → 1.0, a 100× reweighting. E7 was screened on the rendered metric so no reported number is wrong, but any reading of E7's val curve against baseline is meaningless, and it was never flagged in the way E8 and E13 were. All three are now excluded by default in `scripts/val_metric_correlation.py`.
+
+Checkpoint *selection* is unaffected for all three: `prune_checkpoints` compares checkpoints within one run, where a constant scale factor cancels. Only cross-run comparison breaks.
+
+Past runs cannot be rescaled retrospectively — `checkpoint_metrics.csv` recorded `val_svg_total` but not the aux term separately. `val_svg_aux` and `val_svg_para_aux` were added to the manifest 2026-08-04, with the append path guarded so a run in flight writing under the old header does not get its columns shifted.
+
+**(b) Settling-confounded — comparable in scale, but lower val loss need not mean better rollout.** E14 is the known case. Two more are in Tier 3 and running now:
+
+| Candidate | Why it is in this class |
+|---|---|
+| E14 `warmup_cosine` | Ends at 0.05× lr against `ExponentialLR(0.997)`'s 0.635×, a 12.7× gap in terminal step size |
+| **E15 weight EMA** | Averaging weights lowers validation loss essentially by construction — that is what an EMA does. The highest-risk row in Batch A |
+| **E11 AdamW, wd 0.01** | Weight decay shrinks weights: part genuine regularization, part settling |
+
+These stay in the correlation and are reported as residuals, because whether they diverge *is* the finding. Read E15's val curve against its rendered number specifically before promoting it.
+
+**(c) `val_metric` is blind to what the candidate changes.** The training loss carries `kl_beta * kl`; `val_metric` does not include the KL term at all. This is the same class of omission as the `svg_para` gap found and fixed on 2026-08-04, and it is still present. It is defensible as a *choice* — KL does not affect rendered output directly — but it has consequences worth stating: **E12's** checkpoint selection is blind to the very quantity E12 varies, and `val_metric` is therefore not the training objective, which the section above implicitly assumed when it was fixed. Document it as a deliberate choice or fix it; leaving it undecided is how the `svg_para` bug survived as long as it did.
+
+**The dropped experiment.** §3.4 said of E9: *"Sweep [test-time σ] separately, second, on the winning train σ,"* and §4 scheduled it for days 6–8. **It never ran.** Tier 2 launched without it and Tier 3 was scoped without it, and E9 σ_train=0.5 is the rank-1 candidate of all eighteen. It matters for three reasons: σ_test is applied at eval regardless of σ_train, so every E9 row was trained at its own σ and then validated *and tested* at σ=1.0 — for the σ_train=0 row that is a full train/test mismatch and a plausible reason it was the worst E9 row; σ_test governs how much the `n_samples` candidates differ from each other, so it trades directly against best-of-N and has an optimum nobody has looked for; and it needs **no retraining at all**, since `models/transformers.py` parses opts at import and `--enc_noise_std_test` on the test command line reaches the encoder. `scripts/sigma_test_sweep.sh` runs it, eval-only, alongside a training batch. Run it on the E9 winner *and* the baseline: if the optimum is the same for both, it is a property of the eval procedure and shifts the whole results table rather than promoting one candidate.
+
 **Screen cheap, confirm expensive.** Do not run `test_few_shot.py --n_samples 50` over all 34 test fonts for every candidate.
 
 - *Screening eval*: 8 fixed test fonts, `--n_samples 3`, at a fixed epoch. Minutes.
@@ -644,6 +673,10 @@ These are yours. The plan does not commit to them.
 5. ~~**Screening budget.**~~ **Resolved 2026-08-03: 150 epochs everywhere.** Superseded in part by item 3 — the open question is no longer epochs but `n_samples`, and §3.2's decomposition answers it.
 6. ~~**Fix the §1.5 eval-script issue.**~~ **Resolved 2026-08-03**, layout is per-checkpoint and the script handles both.
 7. **What `--max_ckpt_keep` means for the sweep.** Keeping one checkpoint per run is right for disk, but if you later want to score a candidate at both 60 and 150 epochs you need both. Consider 2 for the runs that feed §3.3's validation.
+
+8. **Does `val_metric` omitting the KL term stay a choice or become a fix?** New 2026-08-04. The training loss is `... + kl_beta * kl`; `val_metric` is the same sum without it. Defensible, since KL does not affect rendered output directly, but it means `val_metric` is not the training objective and that E12's checkpoint selection is blind to exactly what E12 varies. The `svg_para` omission in the same function was treated as a bug and fixed; this one has never been decided either way, which is how that one survived. Decide it, in one sentence, and put the sentence in §1.5.
+
+9. **What to do with the σ_test result.** New 2026-08-04. `scripts/sigma_test_sweep.sh` is eval-only and answers a question §3.4 raised and §4 scheduled. If the optimum σ_test differs from the released 1.0 by more than the 0.0011 decode noise, every number in the results table was taken at an arbitrary point on that curve and the screening comparisons need re-running at the better value. That is cheap for the eval but it invalidates the table as a *set*, so decide before running whether a shifted optimum triggers a re-screen or gets reported as a caveat.
 
 ---
 

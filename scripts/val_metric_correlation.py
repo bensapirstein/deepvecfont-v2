@@ -24,11 +24,58 @@ Reads, per experiment under `experiments/`:
 Reports Spearman and Kendall rank correlation, and the per-candidate residual, so a
 single disagreeing candidate is visible rather than averaged away.
 
-## The caveat that decides how to read the output
+## Which runs are comparable at all
 
-E8 and E13 change the cross-entropy itself, so their `val_metric` is on a different
-scale by construction and they are not comparable to anything else. Pass them to
-`--exclude`; the default already does.
+`val_metric` is, from train.py:
+
+    loss_w_l1 * img_l1  +  loss_w_pt_c * vggpt  +  svg['total']  +  svg_para['total']
+
+and `svg['total']` is, from Transformer.loss:
+
+    loss_w_cmd * cmd  +  loss_w_args * args  +  loss_w_aux * aux  +  loss_w_smt * smt
+
+Any candidate that changes a term or a weight inside that expression is measured on a
+different scale from the baseline, and its `val_metric` cannot be compared across
+runs at all. Three candidates do:
+
+    E8   changes the argument target distribution, so `args` changes magnitude.
+    E13  changes the number of bins, so the args cross-entropy changes magnitude.
+    E7   sets loss_w_aux directly. It appears TWICE in val_metric, once via
+         svg['total'] and once via svg_para['total'], and the sweep spans
+         0.01 -> 1.0, a 100x reweighting.
+
+**E7 is the one that was missed.** The plan flagged E8 and E13 as the loss-scale
+changers and excluded them from this correlation, but `loss_w_aux` is a weight
+*inside the very sum* that val_metric is, and E7 was never named. All three are in
+`--exclude` by default now.
+
+Within a single run this does not matter: `prune_checkpoints` compares checkpoints of
+the same run against each other, so a constant scale factor cancels and checkpoint
+selection was never affected. It only breaks cross-run comparison, which is exactly
+what this script does and what reading a wandb curve does.
+
+Note that past runs cannot be retrospectively corrected: `checkpoint_metrics.csv`
+records `val_svg_total` but not the aux term separately, so E7's val_metric cannot be
+rescaled after the fact. `val_svg_aux` was added to the manifest on 2026-08-04 for
+runs from then on.
+
+## The other risk class: candidates that lower val loss without improving rollout
+
+Distinct from the above, and not fixed by excluding anything. `val_metric` is
+teacher-forced; the reported metric is an autoregressive rollout through the
+refinement decoder. Any change that helps the weights settle into a minimum lowers
+teacher-forced loss whether or not rollout improves:
+
+    E14  warmup_cosine ends at 0.05x lr vs ExponentialLR(0.997)'s 0.635x.
+    E15  a weight EMA lowers validation loss essentially by construction; that is
+         what averaging weights does.
+    E11  AdamW with weight_decay 0.01 shrinks weights, part regularization and
+         part settling.
+
+These stay IN the correlation and are reported as residuals via `--flag`, because
+whether they diverge is the finding. E14 is the known case; E15 and E11 are the two
+to watch in the Tier 3 results, and E15 is the most likely of all three to show a
+large val gain that does not survive to the rendered metric.
 
 E14 is the interesting case and is *not* excluded, because it changes no loss term at
 all -- only the LR schedule -- so its `val_metric` is directly comparable. Read its
@@ -136,12 +183,15 @@ def rendered_l1(exp_dir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--experiments_root', default=os.path.join(REPO, 'experiments'))
-    ap.add_argument('--exclude', nargs='*', default=['e8', 'e13'],
-                    help='name prefixes to drop; default drops the two candidates that '
-                         'change the cross-entropy scale, whose val_metric is not '
-                         'comparable to anything else')
-    ap.add_argument('--flag', nargs='*', default=['e14'],
-                    help='name prefixes to keep but report separately as residuals')
+    ap.add_argument('--exclude', nargs='*', default=['e7', 'e8', 'e13'],
+                    help='name prefixes to drop: the candidates that change a term or '
+                         'a weight inside val_metric itself, so their val_metric is on '
+                         'a different scale and is not comparable across runs. E7 sets '
+                         'loss_w_aux, which appears twice inside the sum')
+    ap.add_argument('--flag', nargs='*', default=['e14', 'e15', 'e11'],
+                    help='name prefixes to keep but report separately as residuals: the '
+                         'candidates that lower teacher-forced loss via optimization '
+                         'dynamics rather than better rollout')
     args = ap.parse_args()
 
     if not os.path.isdir(args.experiments_root):
