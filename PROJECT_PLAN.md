@@ -22,8 +22,8 @@ This document covers both graded stages. It absorbs and replaces `archive/STAGE2
 | Paper metric implemented | Yes, `eval_reconstruction_error.py` |
 | Missing for Stage 1 | SSIM, quantization oracle (renderability, per-font CSV and the bin histogram landed) |
 | Stage 2, Tier 1 | Run and screened 2026-08-04. Nothing cleared the noise floor; see §3.2 |
-| Stage 2, Tier 2 | Coded 2026-08-04, staged in `scripts/run_experiments.sh`, unrun. Runbook: `docs/tier2-launch.md` |
-| Seed-noise floor | L1 spread **0.0093** (re-measured 2026-08-04). Decomposition into decode vs seed noise pending, `scripts/eval_noise.sh` |
+| Stage 2, Tier 2 | Run and screened 2026-08-04. Nothing cleared the noise floor either; see §3.5. E8's s-IoU shift (+0.03 to +0.04, L1 flat) is the one candidate observation worth a follow-up |
+| Seed-noise floor | L1 spread **0.0093** (re-measured 2026-08-04). Decomposed 2026-08-04: decode noise 0.0011 (12%), seed variance ~0.0082 (88%) dominates — see §3.2 |
 
 0.1668 sits essentially on DeepSVG's published Chinese number (0.167), so the baseline is inside the benchmark's range even though it does not reach the paper. §2.4 says how to write that up. It is not a blocker for Stage 2, which is measured against your own baseline rather than against 0.080.
 
@@ -264,6 +264,10 @@ The two components have different remedies, which is why separating them is wort
 
 `scripts/eval_noise.sh` measures the decode component directly, by re-screening one fixed checkpoint several times: the weights never change, so the spread it reports is decode noise alone. It also runs an `n_samples` ladder at 10 and 20 to show how fast that component shrinks. Costs no training GPU; it runs alongside the Tier 2 batch. Record the result here as a dated **Measured** paragraph, and only then move `NOISE_FLOOR` in `scripts/test_experiments.sh` off 0.0093.
 
+**Measured (2026-08-04), alongside the Tier 2 launch.** `scripts/eval_noise.sh seedfloor_1111_chn 0`, three reps of the fixed `150_6040.ckpt` checkpoint at `n_samples 3`: L1 = 0.1722 / 0.1717 / 0.1711, spread **0.0011**. The `n_samples` ladder (one run each): 0.1691 at 10, 0.1678 at 20 — both a systematic best-of-N drop, not noise, and not comparable to the n=3 column.
+
+**Decode noise is 0.0011 against a 0.0093 seed-noise floor — about 12% of it.** The remaining ~0.0082 is training-seed variance. This settles the branch: raising `--n_samples` for screening would buy almost nothing, since decode noise was never the dominant term. Resolving effects in the size class Tier 1 and Tier 2 are chasing needs each candidate run at multiple seeds, which is a 3× training matrix — the harder, more expensive branch, and now the confirmed one rather than a guess. That is a §8 decision (item 3), and it now has a number behind it instead of an open question.
+
 The report needs this either way. "Which candidates fell inside the seed noise" (§6, discussion) is a much weaker sentence than an account of what the noise was made of.
 
 **Screen cheap, confirm expensive.** Do not run `test_few_shot.py --n_samples 50` over all 34 test fonts for every candidate.
@@ -359,6 +363,26 @@ Two deviations from what this section originally specified, both deliberate:
 2. **E13's oracle gate is skipped.** It runs after the batch and explains the result rather than licensing it. The alternative was holding a training slot idle behind a script that had not been written.
 
 Read the Tier 1 outcome before reading these results: every candidate there landed inside a floor that grew past the bar meant to screen it. Tier 2's effect sizes are in the same neighbourhood, so the realistic expectation is "recorded, not claimed", and the value of E3 and E13 to the report is partly independent of their sign — both are paper-versus-code corrections from §1.4.
+
+**Measured (2026-08-04).** All eight trained (seed 1111, 150 epochs) and screened in the same session as a re-screened `seedfloor_1111_chn` baseline (`scripts/test_experiments.sh parallel`, GPUs 1-2, `n_samples 3`, all 34 fonts):
+
+| Run | Checkpoint | L1 | s-IoU | delta vs baseline | clears 0.0093 |
+|---|---|---|---|---|---|
+| Baseline, seed 1111 (this session) | `150_6040.ckpt` | 0.1725 | 0.2165 | — | — |
+| E8 `sigma=0.5` | `150_6040.ckpt` | 0.1727 | 0.2571 | +0.0002 | no |
+| E8 `sigma=1.0` | `150_6040.ckpt` | 0.1729 | 0.2510 | +0.0004 | no |
+| E8 `sigma=2.0` | `125_5040.ckpt` | 0.1720 | 0.2574 | −0.0005 | no |
+| E13 `n_args_bins=256` | `150_6040.ckpt` | 0.1675 | 0.2215 | −0.0050 | no |
+| E13 `arg_embed_pad_idx=False` | `150_6040.ckpt` | 0.1706 | 0.2462 | −0.0019 | no |
+| E3 `n_layers_refine=2` | `150_6040.ckpt` | 0.1705 | 0.2187 | −0.0020 | no |
+| E3 `n_layers_refine=3` | `150_6040.ckpt` | 0.1715 | 0.2288 | −0.0010 | no |
+| E14 `warmup_cosine` | `150_6040.ckpt` | 0.1715 | 0.1987 | −0.0010 | no |
+
+Renderability was 100% (1768/1768, 34/34 fonts) for every row, so nothing here is confounded by the renderability caveat in §1.5, same as Tier 1. **None of the eight clear the 0.0093 floor** — consistent with, and reinforcing, the Tier 1 result. E13 at 256 bins is the largest single delta (−0.0050) but is still roughly half the floor.
+
+One result worth carrying into the discussion section regardless of the floor: **all three E8 rows move s-IoU by +0.03 to +0.04 over baseline (0.2165 → 0.251-0.257) while L1 barely moves (±0.0005).** That is a much larger, consistent shift on a different metric than the one the floor was measured on. It is plausibly real rather than noise — three sigmas, one direction, an effect size four to eight times any L1 delta measured in either tier — but it has not been checked against a seed-noise floor for s-IoU specifically, so it should be reported as an observation, not a claim, until it is. If time allows, it is the single most promising follow-up in this tier: measure the s-IoU seed-noise floor (three seeds, baseline only, s-IoU column) and see if E8 clears it there even though it doesn't on L1. §1.2's point about L1 being largely blind to sub-pixel accuracy is one plausible mechanism — ordinal label smoothing softens the argument head's near-miss errors, which could plausibly tighten structural overlap (s-IoU) without changing how many pixels disagree (L1) by a comparable amount.
+
+Note `e8_ls20_chn` selected `125_5040.ckpt` as its best-val checkpoint rather than `150_6040.ckpt` like every other row — `best_checkpoint.py` picked it from the manifest, not hand-chosen; it is why that row's checkpoint column differs.
 
 **E8 — Ordinal label smoothing on the argument head.** *Maps to: modify the loss function, add regularization.*
 
@@ -558,8 +582,8 @@ Three rungs, cheapest first. Do not skip a rung.
 These are yours. The plan does not commit to them.
 
 1. ~~**Tier 2 scope.**~~ **Resolved 2026-08-04: all four, one seed each, eight runs.** ~1 h per run puts this in §3.3's ≤3 h band, so nothing needed cutting. Breadth over depth for the first pass — deepen whichever candidate leads rather than guessing which one deserves three seeds up front. E13 runs without waiting on its oracle gate; see §3.5.
-2. **Tier 3 at all.** Day 9 is the only slot, and dropping it buys back the report time §4 flags as tight. **Live again as of 2026-08-04**, and now competing with two better uses of the same GPU time: (a) re-running the leading Tier 2 candidate at three seeds so it has a mean rather than a point, (b) re-screening everything at a larger `n_samples` if `eval_noise.sh` says decode noise dominates. Both sharpen results that already exist. Tier 3 adds seven more single points to a table where single points have so far proven unresolvable.
-3. **The screening bar itself.** 0.0093 is larger than the 0.008 it replaced and larger than every effect measured so far, which means the current setup cannot resolve anything in this class. Either the budget grows until the floor drops below the effects, or the report says plainly that it did not, and treats the floor as the finding. Do not quietly compare against the old 0.008 to make a candidate look like a winner. §3.2 has the decomposition that decides which branch is affordable.
+2. **Tier 3 at all.** Day 9 is the only slot, and dropping it buys back the report time §4 flags as tight. **Live again as of 2026-08-04**, and now competing with one better use of the same GPU time: re-running the leading Tier 2 candidate at three seeds so it has a mean rather than a point. (The other candidate use, re-screening at larger `n_samples`, is now ruled out — §3.2's decomposition puts decode noise at 12% of the floor, so it would not buy much.) Tier 3 adds seven more single points to a table where single points have so far proven unresolvable.
+3. **The screening bar itself. Resolved 2026-08-04, decomposed but not yet acted on.** `eval_noise.sh` puts decode noise at 0.0011 and seed noise at ~0.0082 of the 0.0093 floor — seed variance dominates, so raising `n_samples` will not shrink the bar. The only remaining lever is running candidates at multiple seeds, a 3× training matrix. Whether to spend that budget, and on which candidate(s), is still open — leaning toward doing it for whichever Tier 2 candidate leads (ties into item 2) rather than the full matrix.
 4. **English.** Currently out of scope. It is a second language column in the results table and a stronger reconstruction section, against roughly a day. Days 3 to 5 came free (§4), so this is more affordable than it was.
 5. ~~**Screening budget.**~~ **Resolved 2026-08-03: 150 epochs everywhere.** Superseded in part by item 3 — the open question is no longer epochs but `n_samples`, and §3.2's decomposition answers it.
 6. ~~**Fix the §1.5 eval-script issue.**~~ **Resolved 2026-08-03**, layout is per-checkpoint and the script handles both.

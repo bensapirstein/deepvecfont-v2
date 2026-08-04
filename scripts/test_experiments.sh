@@ -35,7 +35,9 @@ if [[ "$MODE" != "sequential" && "$MODE" != "parallel" ]]; then
 fi
 
 # GPU ids to use, in order. Check `nvidia-smi` and set these by hand.
-GPUS=(1 2 3)
+# Restricted to 2 GPUs as of 2026-08-04 (user directive) -- GPU 3 is off limits
+# going forward, not just for this run.
+GPUS=(1 2)
 
 # One entry per experiment: "name_exp  <extra args, if any>". Extra args are
 # needed whenever the candidate's flag changes what modules ModelMain

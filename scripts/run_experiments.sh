@@ -31,7 +31,10 @@ fi
 # - sequential: only GPUS[0] is ever used, one experiment at a time.
 # - parallel: EXPERIMENTS runs in waves of len(GPUS) -- one experiment per id
 #   per wave, however many waves it takes to get through the whole array.
-GPUS=(1 2 3)
+# Restricted to 2 GPUs as of 2026-08-04 (user directive) -- GPU 3 is off limits
+# going forward, not just for this run. The already-running Tier 2 batch that
+# used GPU 3 in waves 1-2 was left to finish rather than killed.
+GPUS=(1 2)
 
 # One entry per experiment: "name_exp  <extra args appended to COMMON_ARGS>".
 # This is the loop-over-params spot — add/edit lines here for a sweep.
