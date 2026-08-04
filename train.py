@@ -188,7 +188,19 @@ def train_main_model(opts):
         # NOTE: --resume does not restore the LambdaLR step counter, so resuming a
         # warmup_cosine run restarts the schedule. Nothing in the sweep resumes.
     else:
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.997)
+        # --lr_gamma defaults to the released 0.997. The reason it is a flag: E14
+        # bundles two changes that the plan treated as one -- the warmup+cosine
+        # *shape*, and the fact that warmup_cosine ends at 0.05x lr where this
+        # schedule ends at 0.997^150 = 0.635x. Late-training validation loss falls
+        # as the lr decays and the weights stop bouncing, independently of whether
+        # rollout quality improves, so a lower val curve under warmup_cosine is
+        # confounded until an exp run with a matched terminal lr is compared
+        # against it. gamma = 0.05 ** (1/150) = 0.98023 is that control.
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=opts.lr_gamma)
+        if abs(opts.lr_gamma - 0.997) > 1e-9:
+            print(f"[E14] exp schedule at gamma={opts.lr_gamma}, "
+                  f"terminal factor {opts.lr_gamma ** opts.n_epochs:.4f} over "
+                  f"{opts.n_epochs} epochs")
 
     if opts.tboard:
         writer = SummaryWriter(dir_log)

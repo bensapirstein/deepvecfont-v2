@@ -364,6 +364,8 @@ def check_tier2_wiring():
     """
     print("\n7. tier 2 wiring: E8 / E13 / E3 / E14 [static, source]")
 
+    from options import get_parser_main_model
+
     with open(os.path.join(REPO, 'models', 'transformers.py')) as fh:
         tf_src = fh.read()
     with open(os.path.join(REPO, 'train.py')) as fh:
@@ -415,8 +417,17 @@ def check_tier2_wiring():
     # E14. The schedule changes cadence, so both step sites have to be guarded.
     check("E14: the schedule is selected by flag",
           "sched_per_step = opts.lr_schedule == 'warmup_cosine'" in train_src)
-    check("E14: 'exp' still builds the original ExponentialLR(gamma=0.997)",
-          'ExponentialLR(optimizer, gamma=0.997)' in train_src)
+    # gamma became a flag on 2026-08-04 so a matched-terminal-lr control can
+    # separate E14's schedule shape from plain lr annealing. The default still has
+    # to reproduce the released 0.997, which is now a check on the default rather
+    # than on a literal in the source.
+    check("E14: 'exp' still builds an ExponentialLR from the flag",
+          'ExponentialLR(optimizer, gamma=opts.lr_gamma)' in train_src)
+    check("E14: --lr_gamma defaults to the released 0.997",
+          abs(vars(get_parser_main_model().parse_args([]))['lr_gamma'] - 0.997) < 1e-12)
+    check("E14: the matched-terminal-lr control lands where warmup_cosine does",
+          abs((0.05 ** (1 / 150)) ** 150 - 0.05) < 1e-9,
+          "gamma = 0.05 ** (1/150) = 0.98023 over 150 epochs")
     check("E14: warmup_cosine steps per optimizer step",
           'if sched_per_step:                # E14' in train_src)
     check("E14: the per-epoch step is guarded so it cannot double-step",

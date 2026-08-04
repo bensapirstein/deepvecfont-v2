@@ -271,6 +271,24 @@ The two components have different remedies, which is why separating them is wort
 
 The report needs this either way. "Which candidates fell inside the seed noise" (§6, discussion) is a much weaker sentence than an account of what the noise was made of.
 
+**Checked (2026-08-04): the wandb val curves and the rendered metric disagree, and only about E14.** The `val_metric` curves show `warmup_cosine` consistently below baseline, with E1 and E9 σ=0.5 also looking favourable. Ranking all eighteen Tier 1 and Tier 2 candidates on the rendered screening metric:
+
+| Rank | Candidate | rendered L1 | delta | s-IoU delta |
+|---|---|---|---|---|
+| 1 | E9 σ=0.5 | 0.1665 | −0.0059 | +0.0368 |
+| 2 | E1 `enc_final_norm` | 0.1670 | −0.0054 | −0.0053 |
+| 3 | E13 `n_args_bins=256` | 0.1675 | −0.0050 | +0.0050 |
+| … | | | | |
+| 10 | E14 `warmup_cosine` | 0.1715 | −0.0010 | **−0.0178** |
+
+**E1 and E9 σ=0.5 are confirmed** as the two leading candidates on the metric that gets reported, which is what Batch B already runs at three seeds. **E14 is not.** Its delta of −0.0010 sits at the 0.0011 decode-noise level, so it is indistinguishable from baseline on the rendered metric, and its s-IoU is the worst of any Tier 2 row.
+
+The disagreement is worth more than either number alone, because `val_metric` is by far the **lower-variance instrument**: it is deterministic given a checkpoint, computed over the whole validation set, and logged at every checkpoint, where the rendered metric carries 0.0011 of decode noise from unseeded best-of-N decoding and is measured once. A consistent separation in a val curve genuinely is stronger evidence than a single rendered point — *provided the two agree about which checkpoint is better*. That is §3.2's rank-correlation question, still open, and it now has a concrete reason to be answered: `scripts/val_metric_correlation.py`, no GPU.
+
+There is a specific mechanism that would make E14 the one candidate where the proxy misleads. `warmup_cosine` ends at 0.05× the base lr; the released `ExponentialLR(0.997)` ends at 0.997¹⁵⁰ = 0.635×. That is a **12.7× difference in terminal step size**, and late-training validation loss falls as the lr decays and the weights stop bouncing around the minimum, whether or not autoregressive rollout improves. `val_metric` is teacher-forced; the reported metric is an autoregressive rollout through the refinement decoder, and teacher forcing cannot see exposure bias. `--lr_gamma` was added 2026-08-04 so the control exists: an `exp` run at γ = 0.05^(1/150) = 0.98023 lands on the same terminal lr and isolates the schedule *shape* from plain annealing.
+
+E14 also bundles two factors — warmup and decay shape — which breaks the one-at-a-time rule the rest of the sweep follows. Both are separable with existing flags: `--lr_min_factor 1.0` collapses the cosine to a constant and gives warmup only, `--lr_warmup_steps 1` gives cosine only. The E14-deep block in `scripts/run_experiments.sh` stages all of this, gated on the correlation result.
+
 **Screen cheap, confirm expensive.** Do not run `test_few_shot.py --n_samples 50` over all 34 test fonts for every candidate.
 
 - *Screening eval*: 8 fixed test fonts, `--n_samples 3`, at a fixed epoch. Minutes.
@@ -278,7 +296,7 @@ The report needs this either way. "Which candidates fell inside the seed noise" 
 
 Freeze the screening font list and `ref_char_ids` before the first run and never change them.
 
-**Check whether `val_metric` predicts the test metric.** `compute_val_loss` produces `val_metric` free at every checkpoint, and it now also goes to wandb as `CKPT/val_metric`. It is a teacher-forced loss; the test metric is a rendered, autoregressively decoded, best-of-N L1. How well they correlate on this model is unknown. After the first six experiments, compute the **rank correlation between `val_metric` and screening Error** across those six. High correlation means you screen everything else for free and spend the saved time on more candidates. Low correlation means the validation loss is not a usable proxy, which is a reportable finding in itself, and you screen on the rendered metric from then on.
+**Check whether `val_metric` predicts the test metric.** *(Script written 2026-08-04: `scripts/val_metric_correlation.py`. Costs no GPU, runs against the existing Tier 1 and Tier 2 experiment dirs, and gates the E14-deep batch — see the E14 note above.)* `compute_val_loss` produces `val_metric` free at every checkpoint, and it now also goes to wandb as `CKPT/val_metric`. It is a teacher-forced loss; the test metric is a rendered, autoregressively decoded, best-of-N L1. How well they correlate on this model is unknown. After the first six experiments, compute the **rank correlation between `val_metric` and screening Error** across those six. High correlation means you screen everything else for free and spend the saved time on more candidates. Low correlation means the validation loss is not a usable proxy, which is a reportable finding in itself, and you screen on the rendered metric from then on.
 
 The caveat from §1.5 applies: **E8 and E13 change the cross-entropy itself**, so those two are always screened on the rendered metric regardless of what the correlation says.
 
@@ -620,7 +638,9 @@ These are yours. The plan does not commit to them.
 1. ~~**Tier 2 scope.**~~ **Resolved 2026-08-04: all four, one seed each, eight runs.** ~1 h per run puts this in §3.3's ≤3 h band, so nothing needed cutting. Breadth over depth for the first pass — deepen whichever candidate leads rather than guessing which one deserves three seeds up front. E13 runs without waiting on its oracle gate; see §3.5.
 2. ~~**Tier 3 at all.**~~ **Resolved 2026-08-04: both, in one batch.** The item framed Tier 3 as competing with multi-seed replication for the same slot. At two GPUs and ~1 h per run, sixteen runs is one overnight, so the tier runs as Batch A (breadth, 10 runs) plus Batch B (the three largest deltas at two more seeds each, 6 runs). See §3.6. Batch B is the half to protect if the night is cut short, because it is the one that yields an interpretable number under a null.
 3. ~~**The screening bar itself.**~~ **Resolved and acted on 2026-08-04.** `eval_noise.sh` puts decode noise at 0.0011 and seed noise at ~0.0082 of the 0.0093 floor, so raising `n_samples` will not shrink the bar and multiple seeds is the only lever. Acted on as Batch B in §3.6: three candidates × two additional seeds, chosen as the three largest measured deltas rather than one arbitrary leader, since at this resolution they are indistinguishable from each other. Separately, the **s-IoU** floor is now measured at 0.0401 from the existing seed-floor runs (§3.5) — s-IoU is roughly three times noisier than L1 in relative terms, and the §5 table needs both floors, not just the L1 one.
-4. **English.** Currently out of scope. It is a second language column in the results table and a stronger reconstruction section, against roughly a day. Days 3 to 5 came free (§4), so this is more affordable than it was.
+4. **English. Back in scope 2026-08-04, sized rather than committed.** A second language column and a stronger reconstruction section, against roughly a day. The cost of one English run has never been measured and the two relevant factors pull opposite ways — shorter sequences and half the reference shots make an epoch cheaper, while the budget is 4× longer — so this follows §3.3: time it, then pick the matrix from the measured cost. Plan and cut-off rule in `docs/english-arm.md`. Two things it resolves that are open right now: the `--n_samples` discrepancy for English confirmation (§4 says 10, `COMMANDS.md` uses 20, and the ladder in §3.2 showed that gap is larger than most candidate deltas), and the fact that the English epoch budget must be **frozen from the baseline curve before any candidate is looked at**, since `warmup_cosine` derives its schedule from `--n_epochs` and cannot be compared across budgets at all.
+
+   Scope it as a generalization test, not a second sweep: carry across whatever Batch B promotes plus the §3.7 combination, two or three candidates, not eighteen. Note also that the paper's entire published English ablation spans 0.0069 absolute with individual steps of 0.003 or less, so if the English noise floor lands anywhere near the Chinese 0.0093 it will be wider than the whole effect range being chased.
 5. ~~**Screening budget.**~~ **Resolved 2026-08-03: 150 epochs everywhere.** Superseded in part by item 3 — the open question is no longer epochs but `n_samples`, and §3.2's decomposition answers it.
 6. ~~**Fix the §1.5 eval-script issue.**~~ **Resolved 2026-08-03**, layout is per-checkpoint and the script handles both.
 7. **What `--max_ckpt_keep` means for the sweep.** Keeping one checkpoint per run is right for disk, but if you later want to score a candidate at both 60 and 150 epochs you need both. Consider 2 for the runs that feed §3.3's validation.

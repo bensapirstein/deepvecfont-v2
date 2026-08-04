@@ -126,6 +126,57 @@ EXPERIMENTS=(
   "e13_bins256_3333_chn --seed 3333 --n_args_bins 256"
 )
 
+# ---------------------------------------------------------------------------
+# E14-deep, staged 2026-08-04, NOT yet launched. Swap this in after Tier 3.
+#
+# Motivation: the wandb val curves show warmup_cosine consistently below baseline,
+# but E14's rendered screening delta was -0.0010 -- rank 10 of the 18 candidates
+# run so far, and at the 0.0011 decode-noise level, i.e. indistinguishable from
+# baseline on the metric that is actually reported. It also has the worst s-IoU in
+# Tier 2 (-0.0178). So val_metric and the rendered metric disagree about E14
+# specifically.
+#
+# DO NOT LAUNCH THIS UNTIL `python scripts/val_metric_correlation.py` HAS RUN.
+# It costs no GPU and it decides whether these runs are screened on val_metric at
+# all. If val_metric does not predict rendered Error, rows 1-5 below are measuring
+# a quantity nobody reports and the batch should shrink to rows 6-7.
+#
+# Rows 1-5 are controls: they decompose what E14 actually changed. Rows 6-7 are
+# the only ones with a mechanism for a real gain, and they screen on the rendered
+# metric regardless of what the correlation says.
+# E14_DEEP=(
+#   # 1. THE control. warmup_cosine ends at 0.05x lr; the released ExponentialLR
+#   #    ends at 0.997^150 = 0.635x. That is a 12.7x difference in terminal step
+#   #    size, and late-training val loss falls as the lr decays and the weights
+#   #    stop bouncing around the minimum -- whether or not rollout improves.
+#   #    gamma = 0.05^(1/150) = 0.98023 lands exp on the same terminal lr, so this
+#   #    run isolates "warmup + cosine shape" from "anneal the lr at all".
+#   #    If this reproduces E14's val curve, E14 is an lr-annealing result and the
+#   #    schedule shape contributed nothing.
+#   "e14_ctrl_gamma_chn --seed 1111 --lr_gamma 0.98023"
+#
+#   # 2-3. Split the bundle. E14 changed warmup AND decay shape at once, which
+#   #    violates the one-factor rule the rest of the sweep follows.
+#   #    lr_min_factor 1.0 collapses the cosine to a constant, giving warmup only;
+#   #    lr_warmup_steps 1 gives cosine only. Neither needs new code.
+#   "e14_warmonly_chn --seed 1111 --lr_schedule warmup_cosine --lr_min_factor 1.0"
+#   "e14_cosonly_chn --seed 1111 --lr_schedule warmup_cosine --lr_warmup_steps 1"
+#
+#   # 4-5. How much of the effect is just terminal lr, within warmup_cosine.
+#   "e14_min000_chn --seed 1111 --lr_schedule warmup_cosine --lr_min_factor 0.0"
+#   "e14_min020_chn --seed 1111 --lr_schedule warmup_cosine --lr_min_factor 0.2"
+#
+#   # 6-7. The actual reason warmup exists, and the only rows here likely to move
+#   #    the rendered metric. Warmup's payoff is that it makes a LARGER peak lr
+#   #    stable; running warmup_cosine at the baseline's 2e-4 adds the machinery
+#   #    without collecting the benefit. A higher peak changes which optimum is
+#   #    reached, not merely how tightly the weights settle into it, so unlike
+#   #    rows 1-5 this has a mechanism for improving autoregressive rollout.
+#   "e14_lr4e4_chn --seed 1111 --lr_schedule warmup_cosine --lr 0.0004"
+#   "e14_lr8e4_chn --seed 1111 --lr_schedule warmup_cosine --lr 0.0008"
+# )
+# ---------------------------------------------------------------------------
+
 # Tier 2 batch, 2026-08-04, kept for provenance. Results in §3.5: nothing cleared
 # the 0.0093 floor; E13 bins256 was the largest single delta at -0.0050.
 #   "e8_ls05_chn --seed 1111 --args_label_smooth_sigma 0.5"

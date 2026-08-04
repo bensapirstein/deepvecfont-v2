@@ -95,7 +95,8 @@ def get_parser_main_model():
     parser.add_argument('--n_layers_refine', type=int, default=1, help='[E3] depth of the parallel self-refinement decoder; Sec. 3.3 describes it as 2 layers, the released code clones 1')
     parser.add_argument('--lr_schedule', type=str, default='exp', choices=['exp', 'warmup_cosine'], help='[E14] exp is the original per-epoch ExponentialLR(gamma=0.997); warmup_cosine is per-step linear warmup then cosine decay to the epoch budget')
     parser.add_argument('--lr_warmup_steps', type=int, default=500, help='[E14] linear warmup length in optimizer steps; only read when --lr_schedule warmup_cosine')
-    parser.add_argument('--lr_min_factor', type=float, default=0.05, help='[E14] floor of the cosine decay as a fraction of --lr; only read when --lr_schedule warmup_cosine')
+    parser.add_argument('--lr_min_factor', type=float, default=0.05, help='[E14] floor of the cosine decay as a fraction of --lr; only read when --lr_schedule warmup_cosine. Set to 1.0 to get warmup-then-constant, which isolates the warmup from the decay')
+    parser.add_argument('--lr_gamma', type=float, default=0.997, help='[E14] per-epoch decay of the exp schedule; 0.997 is the released value and lands at 0.635x over 150 epochs, against warmup_cosine\'s 0.05x. Exists so a matched-terminal-lr control can separate "warmup + cosine shape" from "anneal the lr at all"')
 
     # Tier 3 experiment flags. Wired 2026-08-04, same discipline again: every default
     # reproduces the released behaviour, so the Tier 1 and Tier 2 tables and the seed
