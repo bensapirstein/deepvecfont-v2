@@ -26,7 +26,8 @@ This document covers both graded stages. It absorbs and replaces `archive/STAGE2
 | Stage 2, Tier 3 | Run and screened 2026-08-04. Fifteen runs (one dropped at rung 1). Batch A (breadth): null, like Tiers 1 and 2. Batch B (three seeds each on the three largest prior deltas): E9 σ=0.5 is the first candidate with same-sign L1 improvement at all three seeds; E1 and E13 are mixed-sign. See §3.6 |
 | Seed-noise floor | L1 spread **0.0093** (re-measured 2026-08-04). Decomposed 2026-08-04: decode noise 0.0011 (12%), seed variance ~0.0082 (88%) dominates — see §3.2. **s-IoU spread 0.0401** (2026-08-04), roughly three times noisier than L1 in relative terms — see §3.5 |
 | Results table | `RESULTS.csv` at the repo root, one row per scored checkpoint, rebuilt by `scripts/build_results_table.py`. 37 rows as of 2026-08-05 |
-| Two readings of that table (2026-08-05) | **(a)** Every single-seed delta in this document is quoted against `seedfloor_1111_chn` = 0.1725, the *worst* of the three baseline draws and 0.0046 above their mean. 21 of 26 candidates beat that anchor (sign test p = 0.0025); only 5 of 26 beat the mean. Every "largest delta" ranking here, including the one that chose Batch B, was computed against an unlucky draw. **(b)** The 26 candidates span 0.0101 in L1; three baseline seeds span 0.0094. Twenty-six draws should span ~2.3× the range of three, so the candidate-induced spread is roughly **half** the seed-induced one. Both in §3.2 |
+| Two readings of that table (2026-08-05) | **(a)** Every single-seed delta in this document is quoted against `seedfloor_1111_chn`, the *worst* of the three baseline draws and 0.0048 above their mean. **22 of 26** candidates beat that anchor; only **6 of 26** beat the mean. Every "largest delta" ranking here, including the one that chose Batch B, was computed against an unlucky draw. **(b)** The 26 candidates span 0.0101 in L1; three baseline seeds span 0.0097. Twenty-six draws should span ~2.3× the range of three, so the candidate-induced spread is roughly **half** the seed-induced one. Both in §3.2 |
+| Deltas are generated, not typed (2026-08-05) | `scripts/recompute_deltas.py` regenerates every screening delta from `RESULTS.csv` against the corrected anchor (**0.1728** L1 / 0.2240 s-IoU), with a *vs anchor* and a *vs three-seed mean* column. **Floors: L1 0.0097, s-IoU 0.0315.** The hand-typed tables in §3.2, §3.5 and §3.6 are kept for provenance because they are what every ranking decision was made on; **the script wins on conflict.** Why the anchor moved is in §3.2 |
 | Where Stage 2 landed | **E9 `enc_noise_std_train=0.5` is the single finalist.** Same-sign paired improvement at all three seeds on L1 *and* on s-IoU — six of six, on two metrics that correlate at only r = −0.335 across the table. **E1 is a same-sign negative result**, degrading s-IoU at all three seeds by 1.8× its own floor, the only effect anywhere in this project that exceeds its floor. §3.6 |
 | Confirmation session | **Run and closed 2026-08-05** (`docs/confirmation-launch.md`). σ_test ladder null on both E9 and baseline (σ_test=1.0 stands, §8 item 9). `val_metric` doesn't predict the rendered metric (ρ=0.125, §3.2) — E14-deep cut to its two peak-lr rows. E9's confirmation eval, all three seeds, `n_samples 50`: **L1 −0.0040 vs baseline mean, s-IoU +0.0271**, paired Wilcoxon same-sign at all three seeds on both metrics (two of three strongly significant; seed 3333 the weak leg on both, as at screening). Table in §5 |
 | Next session | Stage 1 closeout (SSIM, quantization oracle, §2.4 prose — Mac-side, no cluster) and start writing §6 sections 1–3. English arm and E14-deep's two peak-lr rows if cluster time remains. See §9 |
@@ -190,12 +191,27 @@ Run this before anything else in §2.3. It is a few minutes of work and it eithe
 
 **Quantization oracle.** Push ground-truth sequences through `numericalize` then `denumericalize`, render, and score with the identical pipeline. This is the floor no model with the current head can beat. Use whichever grid the histogram says is actually in force, and report which:
 
-| Grid | Bin width (viewBox units) | At 64×64 | Rounding error per coordinate |
+| Grid | Bin width (numericalize units) | At 64×64 | Rounding error per coordinate |
 |---|---|---|---|
+| n = 256 (the paper's Sec. 3.1 text) | `30/256 = 0.1172` | 0.3125 px | uniform on ±0.15625 px |
 | n = 128 (`models/transformers.py`) | `30/128 = 0.2344` | 0.625 px | uniform on ±0.3125 px |
 | n = 64 (`data_utils/relax_rep.py`) | `30/64 = 0.4688` | 1.25 px | uniform on ±0.625 px |
 
 One pass over the test set, and it becomes the reference row that tells you what fraction of your gap to 0.080 is even addressable by a coordinate-level change. At the 64-bin grid that fraction is roughly four times larger than at 128, so the answer matters.
+
+**Written 2026-08-05: `scripts/quantization_oracle.py`.** Mac-side, runs on the cluster because it needs the dataset. Two things about it are worth stating in the report rather than buried in the script.
+
+**The pixel arithmetic in the table above hides a trap, and the script asserts against it.** `numericalize` normalizes by **30**, while `SVG_PREFIX_BIG` in `data_utils/svg_utils.py` sets **`viewBox="0 0 24 24"`**. Neither constant is the image size and they are not the same number, so a bin is `(30/n) · (img_size/24)` pixels — 0.625 px at n=128, not the 0.5 px that `img_size/n` would give. The 24/30 factor is exactly the kind of thing that silently rescales a floor by 25%, so `--selftest` checks all three widths and the erroneous form explicitly.
+
+**The oracle reports two floors, and only the difference is about quantization.** Rendering the *unquantized* ground-truth sequence through `render()` and scoring it against the dataset's own stored raster does not give L1 = 0: the two rasterizers disagree at glyph edges, `render()` truncates past `max_seq_len`, and the path is reconstructed from relaxed commands. The script therefore always evaluates `n=inf` alongside the requested grids.
+
+```
+L1(n=inf)                the pipeline floor -- rasterizer and representation
+L1(n=128) - L1(n=inf)    the cost of quantization proper, at the released grid
+L1(n=128) - L1(n=256)    the ceiling on what E13 could ever have bought
+```
+
+Quoting the raw oracle as "the quantization floor" without subtracting the pipeline term would attribute the whole residual to quantization. That is the same class of mistake as anchoring every delta on one seed, one level down, and it is worth a sentence in §6 next to the anchor bias for exactly that reason. The third line is the one that retires E13: it is an upper bound on a candidate that already screened null, computed without training anything.
 
 ### 2.4 The gap to 0.080, and how to write about it
 
@@ -211,6 +227,28 @@ What the report should list, without spending days chasing any of it:
 Of these, only the last two cost anything to check, and both are already on the day 1 list for other reasons: the results-glob question has to be settled before any Stage 2 comparison is trustworthy, and the bin histogram has to run before E13 can be scoped. Neither is being run to explain the gap. The explanation falls out for free.
 
 A reproduction that lands at 0.1668 with a paragraph of honest accounting is a fine Stage 1. What matters for the grade is that the measurement setup is sound from here on, because Stage 2 is a comparison against your own baseline, not against 0.080.
+
+---
+
+#### Answered (2026-08-05). Three of the four are ruled out; the fourth is the whole gap.
+
+The four candidates above have now been checked rather than listed, and they do not divide evenly. **Two are eliminated by measurement, one is eliminated by arithmetic, and the remaining one accounts for the gap on its own.**
+
+**Ruled out: the harness bug.** §1.5, resolved 2026-08-03. `eval_reconstruction_error.py` prints `Layout: per-checkpoint`, so 0.1668 was scored against the tree the named checkpoint actually produced. The number means what it says.
+
+**Ruled out: coarser quantization than assumed.** §1.5, resolved 2026-08-03 by reading `relax_rep.process` rather than by reading the histogram. `sequence_relaxed.npy` is written before `cal_aux_bezier_pts` mutates its argument, so the n=64 round trip never reaches disk and the training sequences carry full float resolution. The head predicts over 128 bins against data that genuinely populates them. `scripts/quantization_oracle.py` (new, 2026-08-05) puts a number on what is left: one bin is 0.625 px at 64×64 and rounding error is uniform on ±0.3125 px, which §1.2 says the metric is largely blind to by construction. The oracle measures the residual directly rather than arguing about it, and it separates the pipeline floor from the quantization cost so the two cannot be conflated.
+
+**Ruled out: a different test protocol.** This one looked live and is not, because the protocol differences that exist all push in the *wrong direction* or are far too small. `n_samples` is the largest of them, and §3.2's ladder measured its size: 0.1722 at n=3, 0.1691 at n=10, 0.1678 at n=20, and the confirmation eval reads 0.1662 at n=50. That is a systematic best-of-N improvement of about 0.006 across a sixteen-fold budget increase, and it is already included in the 0.1668 figure, which was scored at n=50. Even granting the paper an unstated advantage on `ref_char_ids` and the font list of the same order, the whole protocol surface moves this number by something like 0.01 against a gap of 0.087. **Protocol accounts for roughly a tenth of the gap at the very most.**
+
+**Not ruled out, and sufficient on its own: the training budget.** The baseline was trained for 125 epochs, and the three-seed floor runs for 150. The paper does not state its Chinese budget. Three separate observations point the same way and none of them required an experiment:
+
+1. **The val loss was still falling at the end of every run.** Epoch 135 scores 0.1641 against epoch 125's 0.1668, and epoch 150 is the best-val checkpoint for five of the six seed-floor and E9 runs. A model still improving when the budget ends is undertrained, which is the definition rather than an inference.
+2. **The English run is the control.** `dvf_base_exp_eng` reached epoch 600 with `val_metric` 2.0824, against the Chinese runs' 3.8–4.0 at 150. The English arm ran roughly four times the epochs on a task with shorter sequences, and it is the one configuration here whose budget resembles a converged one. That the Chinese arm ran at a quarter of it, on 71-step sequences rather than 51, is the single largest configuration difference between this reproduction and the paper.
+3. **Nothing else moves the metric this far.** This is the strongest evidence and it comes free from Stage 2. **Twenty-six deliberate single-factor changes to the architecture, the optimizer, the loss weighting, the quantization grid, the latent width and the regularization together span 0.0101 in L1** (§3.2). The gap to the paper is 0.087, roughly nine times that entire span. No single architectural difference between this reproduction and the paper's could plausibly be worth nine times the range of twenty-six deliberate ones. A budget difference can be, because it is the one axis the sweep never varied.
+
+So the honest sentence for the report is not "we do not know why". It is: **the gap is dominated by training budget, protocol explains at most a tenth of it, and the two mechanical explanations that would have invalidated the reproduction are both ruled out by measurement.** 0.1668 landing on DeepSVG's published 0.167 is then a coincidence worth stating and not leaning on, since DeepSVG is a different model and the agreement carries no information about this one.
+
+**What this does not license.** None of the above is a claim that training longer would reach 0.080, and no run was made to test it. Confirming it would cost a 600-epoch Chinese run, roughly four hours, and it would answer a Stage 1 question with budget that Stage 2 has better uses for. It is written up as the leading explanation with its evidence and its status stated, which is what §2.4 said to do from the start. If cluster time is idle at the end, one 600-epoch seed-1111 run is the cheapest way to convert this paragraph from an argument into a measurement, and the §5 table has a row waiting for it.
 
 ### 2.5 Stage 1 closes when
 
@@ -347,6 +385,28 @@ Nothing already recorded is *wrong* — a delta against a named single-seed run 
 3. **Report both references in §5.** Quote each delta against the baseline mean, with the per-seed anchor kept alongside so the earlier tables remain traceable. A results table that silently anchors on one seed of three is the exact failure mode this section exists to prevent, and having walked into it and caught it is worth a paragraph in §6.
 
 **Measured (2026-08-05): changing the architecture moves the metric about half as much as changing the seed does.** Same twenty-six rows, treated as a sample rather than as individual claims. They span 0.1645 to 0.1746, a range of 0.0101 with sd 0.0026. The three baseline seeds span 0.1631 to 0.1725, a range of 0.0094 with sd 0.0047. If both sets were draws from the same distribution, twenty-six draws should span roughly **2.3×** the range of three (the expected range of a normal sample is ≈1.69σ at n = 3 and ≈3.90σ at n = 26); the observed ratio is **1.07**, implying a candidate-induced σ around 0.47 of the seed-induced σ. The direct sd ratio gives 0.56, which agrees. So: twenty-six deliberate single-factor architectural changes, spanning normalization, latent width, optimizer, quantization, loss weighting, LR schedule, regularization and capacity, collectively perturb the rendered metric **less than re-running the released model under a different random seed does.** State it with the caveat that an sd from three points is itself poorly determined; the range argument, which does not depend on that sd, carries the claim on its own. This is the strongest single sentence Stage 2 produced and it belongs in §6.
+
+**Recomputed (2026-08-05, after the confirmation session): the screening anchor itself moved, and every delta in this document is now generated rather than typed.** Clearing `results/<ckpt>/` to fix the stale-budget bug in §3.7 also removed the seed-1111 screening tree, so `build_results_table.py` picked up a re-scored row on the next rebuild. The anchor reads **0.1728 / 0.2240** where every table above was written against 0.1725 / 0.2165, and `e9_sigma050_chn` moved 0.1665 → 0.1661.
+
+Both shifts are decode noise, and the decision was to **recompute rather than caveat**. `scripts/recompute_deltas.py` (new) regenerates every screening delta directly from `RESULTS.csv`, printing a *vs anchor* and a *vs three-seed mean* column side by side so the disagreement between them stays visible. The hand-typed tables in §3.2, §3.5 and §3.6 are kept for provenance, since they are what every ranking decision was actually made on, but **the script is the live table and it wins on conflict.**
+
+| | As recorded | Recomputed |
+|---|---|---|
+| Anchor `seedfloor_1111_chn`, L1 | 0.1725 | **0.1728** |
+| Anchor, s-IoU | 0.2165 | **0.2240** |
+| Three-seed mean, L1 | 0.1679 | **0.1680** |
+| **L1 floor** | 0.0093 | **0.0097** |
+| **s-IoU floor** | 0.0390–0.0401 | **0.0315** |
+| Candidates beating the anchor | 21 / 26 | **22 / 26** |
+| Candidates beating the mean | 5 / 26 | **6 / 26** |
+| Candidate L1 span vs seed span | 0.0101 / 0.0094 | **0.0101 / 0.0097** |
+| E9 σ=0.5 screening delta vs anchor | −0.0059 | **−0.0067** |
+
+No conclusion changes: E9 remains the only same-sign candidate, every tier stays null by a wide margin, and the anchor still sits +0.0048 above the mean. Two readings sharpen.
+
+**The s-IoU floor was inflated, so E1's negative result is larger than recorded.** Seed 1111's s-IoU moved 0.0075 between screening sessions on a bit-identical checkpoint, against 0.0003 for L1 on the same pair of runs. s-IoU's decode noise is therefore an order of magnitude larger in absolute terms than L1's, and the excursion happened to land in the direction that widened the floor. The correction runs both ways and both terms move. E1's own seed-1111 paired difference was computed against the old 0.2165 anchor and reads −0.0139 against 0.2240, so the deficit deepens from −0.0735 to **−0.0760** at the same time as the floor shrinks. **E1 is 2.4× its floor**, not the 1.9× quoted against 0.0401. Quote the floor as ≈0.03, not to four digits, and say in §6 that a floor estimated from three points is itself a noisy quantity — which is the same lesson as the anchor bias, one level up.
+
+**The candidate span and the seed span have all but converged**, 0.0101 against 0.0097. The half-as-much reading above is unaffected in substance and slightly tighter in the ratio.
 
 **Screen cheap, confirm expensive.** Do not run `test_few_shot.py --n_samples 50` over all 34 test fonts for every candidate.
 
@@ -578,6 +638,8 @@ The table above reads Batch B on L1 alone. The s-IoU column of the same six runs
 **E9's case is stronger than the L1 table alone shows.** Six paired differences, two metrics, three seeds, and every one of the six points the same way. That matters because the two metrics turn out to be nearly independent instruments here rather than two views of the same thing: across the thirty-one 150-epoch Chinese rows in `RESULTS.csv` the Pearson correlation between L1 and s-IoU is only **r = −0.335** (negative meaning weak *agreement*, since lower L1 and higher s-IoU are both good), which is r² = 0.11 — about 11% shared variance and 89% that L1 cannot see. A permutation test puts that correlation at **p = 0.07**, so it is not even clearly distinguishable from zero at this sample size, which if anything sharpens the point: on this model, at this resolution, rasterized L1 and structural overlap are close to orthogonal readings of the same output. A candidate moving both in the favourable direction at every seed is therefore doing more than moving one number. This is also the measurement §1.2 and §6 have been missing: "what the metric can and cannot see" now has a number instead of an argument.
 
 **E1 is not a null result. It is a same-sign negative one, and it should be reported as a finding.** §3.6 above records E1 as "mixed-sign", which is true of L1 and misses the s-IoU column entirely. On s-IoU, E1 degrades at all three seeds, monotonically, by a mean of −0.0735 — **1.8 to 1.9× the s-IoU seed floor**, and the only effect measured anywhere in this project that exceeds its own floor at all.
+
+> **Superseded 2026-08-05 by the recompute in §3.2, and the effect gets larger.** Both terms of that ratio were computed against the pre-recompute seed-1111 anchor. E1's seed-1111 paired difference is **−0.0139** against the corrected 0.2240 anchor rather than −0.0064, so the three legs read −0.0139 / −0.0681 / −0.1460 and the mean deficit is **−0.0760**, against a floor of **0.0315**. **E1 is 2.4× its floor.** The paragraph below is kept as written because it is the reading that promoted E1 to a finding; quote 2.4× and −0.0760 in the report. Verified against `RESULTS.csv`.
 
 *(A note on that floor, found while checking these numbers. §3.5 records it as 0.0401, from the Tier 1 session's baseline s-IoU of 0.2154 / 0.2410 / 0.2555. The Tier 3 re-screen in `RESULTS.csv` gives 0.2165 / 0.2410 / 0.2555, a spread of **0.0390**. The two differ because seed 1111's s-IoU moved by 0.0011 between screening sessions on an identical checkpoint — the same decode noise §3.2 measured on L1, and the same size. So the s-IoU floor is itself uncertain at the ±0.001 level and should be quoted as ≈0.039–0.040 rather than as 0.0401 to four digits. Nothing downstream changes: E1's −0.0735 is 1.83× the larger of the two and 1.88× the smaller.)* Its seed-3333 leg scores s-IoU 0.1095, the lowest value in the whole thirty-seven-row table by a margin, against a candidate range that otherwise bottoms out near 0.196. And the two degraded seeds are exactly the two that selected epochs 125 and 100 rather than 150, so late training stopped improving `val_metric` under the terminal LayerNorm on two of three seeds.
 

@@ -127,6 +127,12 @@ def main():
             n_fonts = len(font_rows)
             l1 = sum(float(r["l1"]) for r in font_rows) / n_fonts
             s_iou = sum(float(r["iou"]) for r in font_rows) / n_fonts
+            # SSIM landed in eval_reconstruction_error.py on 2026-08-05, so per-font
+            # CSVs written before then have no ssim column. Left blank rather than
+            # zero-filled: a missing measurement and a measured zero are different.
+            ssim = ""
+            if font_rows[0].get("ssim") not in (None, ""):
+                ssim = f"{sum(float(r['ssim']) for r in font_rows) / n_fonts:.4f}"
             glyphs_expected = sum(int(r["glyphs_expected"]) for r in font_rows)
             glyphs_failed = sum(int(r["glyphs_render_failed"]) for r in font_rows)
             fonts_rendered = sum(1 for r in font_rows if int(r["glyphs_render_failed"]) == 0)
@@ -164,7 +170,7 @@ def main():
                     "glyphs_rendered": glyphs_expected - glyphs_failed,
                     "l1": f"{l1:.4f}",
                     "s_iou": f"{s_iou:.4f}",
-                    "ssim": "",  # not implemented yet, see PROJECT_PLAN.md 2.2
+                    "ssim": ssim,
                     "eval_date": eval_date,
                     "notes": NOTES.get(name_exp, ""),
                 }
