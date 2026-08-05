@@ -140,3 +140,19 @@ For English, swap `--exp_dir` to `experiments/dvf_base_exp_eng_main_model`.
 
 Results so far:
 - chn `125_5040_valloss3.8273.ckpt`: L1=0.1668, mean IOU=0.2550 (34 fonts, 1768 glyphs) (2026-08-01)
+
+## Results table (`RESULTS.csv`)
+
+One row per scored checkpoint -- name, seed, checkpoint, L1, s-IoU, renderability,
+eval budget. Regenerate after any new `eval_reconstruction_error.py` run (it reads
+every `experiments/*/results/*.csv` on disk, so it's always a full rebuild, not an
+append):
+
+```
+python scripts/build_results_table.py
+git add RESULTS.csv && git commit -m "update RESULTS.csv" && git push
+```
+
+New experiment directories are picked up automatically. If the script warns
+`not in BATCH map, tagged 'unclassified'`, add the new `name_exp` to the `BATCH`
+dict (and `N_SAMPLES`/`NOTES` if relevant) at the top of the script.

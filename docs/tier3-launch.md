@@ -1,6 +1,7 @@
 # Tier 3 launch runbook
 
-2026-08-04, day 2. Sixteen training runs in two batches, plus one eval-only audit.
+2026-08-04, day 2. Sixteen training runs planned in two batches, plus one eval-only
+audit. Fifteen actually launched: rung 1 dropped `e2_instancenorm_chn` (see below).
 Follows `docs/tier2-launch.md`; read `PROJECT_PLAN.md` §3.6 and §8 items 2-3 first.
 
 ## Why the batch has this shape
@@ -80,13 +81,23 @@ done
 rm -rf experiments/t3_probe_main_model experiments/t3_sanity_default_main_model
 ```
 
+**Run 2026-08-04: `--img_norm instance` failed here, everything else passed.**
+`ValueError: Expected more than 1 spatial element when training, got input size
+torch.Size([32, 1024, 1, 1])` -- the image encoder's deepest layer bottlenecks to
+a 1x1 feature map, and `nn.InstanceNorm2d` needs more than one spatial element to
+compute a per-instance variance. `check_infra.py`'s E2 checks only construct the
+module, they don't forward a tensor at the bottleneck's actual shape, so this was
+rung 1's to catch and it did. Dropped `e2_instancenorm_chn` from both
+`scripts/run_experiments.sh` and `scripts/test_experiments.sh`; batch runs as
+fifteen. See `PROJECT_PLAN.md` §3.6 for the report-facing note.
+
 Then confirm one checkpoint round-trips, since strict loading is where a
 train/test flag mismatch shows up:
 
 ```bash
 CUDA_VISIBLE_DEVICES=1 python train.py --mode train --name_exp t3_probe_bn \
   --model_name main_model --language chn --max_seq_len 71 --ref_nshot 8 \
-  --batch_size 32 --seed 1111 --n_epochs 1 --freq_ckpt 0 --max_ckpt_keep 1 \
+  --batch_size 32 --seed 1111 --n_epochs 1 --freq_ckpt 1 --max_ckpt_keep 1 \
   --img_norm batch
 CUDA_VISIBLE_DEVICES=1 python test_few_shot.py --mode test --name_exp t3_probe_bn \
   --language chn --max_seq_len 71 --model_name main_model --batch_size 1 \
@@ -98,7 +109,8 @@ rm -rf experiments/t3_probe_bn_main_model
 ## Launch
 
 `scripts/run_experiments.sh` is already filled with both batches, in order.
-`GPUS=(1 2)`, so sixteen runs is eight waves at roughly an hour each.
+`GPUS=(1 2)`, so fifteen runs is eight waves (the last with one idle GPU) at
+roughly an hour each.
 
 ```bash
 cd ~/deepvecfont-v2
