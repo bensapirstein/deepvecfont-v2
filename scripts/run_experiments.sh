@@ -40,7 +40,8 @@ GPUS=(1 2)
 # This is the loop-over-params spot — add/edit lines here for a sweep.
 #
 # Tier 3 + multi-seed replication, 2026-08-04 (PROJECT_PLAN.md §3.6, §8 items 2-3).
-# Sixteen runs in two batches. Two GPUs, ~1 h per run, so ~8 h — one overnight.
+# Sixteen runs in two batches, fifteen after e2_instancenorm_chn was dropped at
+# rung 1 (see the E2 note below). Two GPUs, ~1 h per run, so ~7-8 h — one overnight.
 #
 # The batch is split because the two halves answer different questions and the
 # second is the one that survives a null:
@@ -78,12 +79,18 @@ EXPERIMENTS=(
 
   # E2, image-stack normalization. The released norm is a spatial LayerNorm over
   # [C, H, W], which pools channel and spatial statistics together and so discards
-  # per-channel scale. All three alternatives normalize per channel. This is the
-  # assignment's "add normalization layers" bullet done on the image branch, where
-  # E1 did it on the sequence branch.
+  # per-channel scale. This is the assignment's "add normalization layers" bullet
+  # done on the image branch, where E1 did it on the sequence branch.
+  #
+  # --img_norm instance dropped 2026-08-04, rung 1: the image encoder's deepest
+  # layer bottlenecks to a 1x1 spatial feature map, and nn.InstanceNorm2d raises
+  # ValueError("Expected more than 1 spatial element when training, got input
+  # size torch.Size([32, 1024, 1, 1])") there -- it needs >1 spatial element to
+  # compute a per-instance variance. group and batch have no such constraint.
+  # Architectural incompatibility, not a wiring bug; itself worth a line in the
+  # report. See PROJECT_PLAN.md 3.6.
   "e2_groupnorm_chn --seed 1111 --img_norm group"
   "e2_batchnorm_chn --seed 1111 --img_norm batch"
-  "e2_instancenorm_chn --seed 1111 --img_norm instance"
 
   # E4, width. ngf 16 -> 32 doubles both image encoder and decoder. Unlike every
   # other row in this batch it changes capacity, so read it as a capacity control

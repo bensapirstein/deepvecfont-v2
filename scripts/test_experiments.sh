@@ -87,7 +87,7 @@ EXPERIMENTS=(
   "e11_adamw_chn"
   "e2_groupnorm_chn --img_norm group"
   "e2_batchnorm_chn --img_norm batch"
-  "e2_instancenorm_chn --img_norm instance"
+  # e2_instancenorm_chn dropped -- see run_experiments.sh's E2 note.
   "e4_ngf32_chn --ngf 32"
   "e15_ema999_chn"
   "e5_bneck256_chn --bottleneck_bits 256"

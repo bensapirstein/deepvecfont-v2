@@ -23,7 +23,7 @@ This document covers both graded stages. It absorbs and replaces `archive/STAGE2
 | Missing for Stage 1 | SSIM, quantization oracle (renderability, per-font CSV and the bin histogram landed) |
 | Stage 2, Tier 1 | Run and screened 2026-08-04. Nothing cleared the noise floor; see §3.2 |
 | Stage 2, Tier 2 | Run and screened 2026-08-04. Nothing cleared the noise floor either; see §3.5. E8's s-IoU shift was flagged as the one follow-up worth budget, then **closed 2026-08-04** without a GPU: it sits at the s-IoU seed floor, not above it |
-| Stage 2, Tier 3 | Coded and staged 2026-08-04. Sixteen runs in two batches — breadth at seed 1111, plus the three largest measured deltas at two more seeds each. Not yet launched; see §3.6 and `docs/tier3-launch.md` |
+| Stage 2, Tier 3 | Run and screened 2026-08-04. Fifteen runs (one dropped at rung 1). Batch A (breadth): null, like Tiers 1 and 2. Batch B (three seeds each on the three largest prior deltas): E9 σ=0.5 is the first candidate with same-sign L1 improvement at all three seeds; E1 and E13 are mixed-sign. See §3.6 |
 | Seed-noise floor | L1 spread **0.0093** (re-measured 2026-08-04). Decomposed 2026-08-04: decode noise 0.0011 (12%), seed variance ~0.0082 (88%) dominates — see §3.2. **s-IoU spread 0.0401** (2026-08-04), roughly three times noisier than L1 in relative terms — see §3.5 |
 
 0.1668 sits essentially on DeepSVG's published Chinese number (0.167), so the baseline is inside the benchmark's range even though it does not reach the paper. §2.4 says how to write that up. It is not a blocker for Stage 2, which is measured against your own baseline rather than against 0.080.
@@ -449,6 +449,42 @@ Batch A: E12 `kl_beta` ∈ {0, 0.1}, E11 AdamW at `weight_decay` 0.01, E2 `img_n
 Batch B: E9 σ=0.5 (−0.0059), E1 `enc_final_norm` (−0.0054), E13 `n_args_bins=256` (−0.0050), each at two additional seeds. Those three are the largest deltas measured across both tiers and are indistinguishable from each other at this resolution, which is why picking one to deepen would have been arbitrary. §3.2's decomposition put ~88% of the 0.0093 floor in seed variance, so this is the only lever that shrinks the bar, and Batch B is the half to protect if the night is cut short.
 
 **Batch B is not read against the 0.0093 floor.** That number is the baseline's own spread across seeds and is the quantity being replaced. Read it as baseline mean and spread against candidate mean and spread, plus the paired per-seed difference, since the seeds are matched. A candidate whose three per-seed differences share a sign earns the confirmation eval even if the means overlap — a statement neither earlier tier could support.
+
+**Launched 2026-08-04, rung 1 dropped one candidate before training started.** `--img_norm instance` (`nn.InstanceNorm2d`) crashes at the image encoder's deepest layer, which bottlenecks to a `[32, 1024, 1, 1]` feature map: `ValueError: Expected more than 1 spatial element when training`. InstanceNorm needs more than one spatial element to compute a per-instance variance; `GroupNorm` and `BatchNorm2d` in the same slot have no such constraint. This is an architectural incompatibility surfaced by rung 1's construction-then-shape probe (`docs/tier3-launch.md`), not a wiring bug `check_infra.py` could have caught (its E2 checks only verify the module constructs, not that it survives a forward pass at the bottleneck's actual resolution). Dropped from both `scripts/run_experiments.sh` and `scripts/test_experiments.sh`; the batch runs as fifteen rather than sixteen. Worth a line in the report's E2 discussion as its own finding: three normalization alternatives were tried, one is structurally incompatible with this architecture's 1×1 bottleneck. The other seven rung-1 probes (`--img_norm group/batch`, `--ngf 32`, `--bottleneck_bits 256/1024`, `--ema_decay 0.999`, `--optimizer adamw`) and the `--img_norm batch` checkpoint round-trip all passed cleanly.
+
+**Measured (2026-08-04).** All fifteen trained (150 epochs) and screened alongside a re-screened three-seed baseline (`scripts/test_experiments.sh parallel`, GPUs 1-2, `n_samples 3`, all 34 fonts). Renderability was 100% (1768/1768, 34/34 fonts) for every one of the 21 runs.
+
+Baseline, re-screened this session: seed 1111 L1 0.1725 / s-IoU 0.2165, seed 2222 L1 0.1631 / s-IoU 0.2410, seed 3333 L1 0.1680 / s-IoU 0.2555 — mean L1 0.1679, spread 0.0094, matching the standing 0.0093 floor.
+
+*Batch A (breadth, single seed 1111):*
+
+| Run | Checkpoint | L1 | s-IoU | delta vs baseline | clears 0.0094 |
+|---|---|---|---|---|---|
+| E12 `kl_beta=0.0` | `150_6040.ckpt` | 0.1649 | 0.2531 | −0.0076 | no |
+| E12 `kl_beta=0.1` | `150_6040.ckpt` | 0.1735 | 0.2347 | +0.0010 | no |
+| E11 AdamW, `wd=0.01` | `150_6040.ckpt` | 0.1698 | 0.2110 | −0.0027 | no |
+| E2 `img_norm=group` | `150_6040.ckpt` | 0.1673 | 0.2349 | −0.0052 | no |
+| E2 `img_norm=batch` | `150_6040.ckpt` | 0.1645 | 0.2515 | −0.0080 | no |
+| E4 `ngf=32` | `125_5040.ckpt` | 0.1691 | 0.1965 | −0.0034 | no |
+| E15 `ema_decay=0.999` | `150_6040.ckpt` | 0.1709 | 0.2278 | −0.0016 | no |
+| E5 `bottleneck_bits=256` | `125_5040.ckpt` | 0.1687 | 0.2259 | −0.0038 | no |
+| E5 `bottleneck_bits=1024` | `150_6040.ckpt` | 0.1699 | 0.2516 | −0.0026 | no |
+
+**None of the nine clear the floor** — the same null as Tier 1 and Tier 2. Reportable as coverage of the assignment's change categories, per the batch's own design.
+
+*Batch B (the three largest Tier 1/2 deltas, each at three seeds):*
+
+| Candidate | Mean L1 (3 seeds) | Mean spread | Per-seed diff vs baseline (1111/2222/3333) | Same sign? |
+|---|---|---|---|---|
+| E9 `enc_noise_std_train=0.5` | 0.1645 | 0.0063 | −0.0060 / −0.0027 / −0.0013 | **yes, all negative** |
+| E1 `enc_final_norm` | 0.1694 | 0.0075 | −0.0055 / +0.0037 / +0.0063 | no |
+| E13 `n_args_bins=256` | 0.1699 | 0.0062 | −0.0050 / +0.0106 / +0.0006 | no |
+
+Per §3.6's own reading rule, this is not read against the 0.0093/0.0094 floor — that number is baseline's own seed spread, the quantity being replaced. Read as mean-against-mean plus the paired per-seed sign.
+
+**E9 σ=0.5 is the one candidate whose per-seed difference has the same sign at all three seeds** — L1 improves at 1111, 2222 and 3333 alike, even though the −0.0033 mean improvement is smaller than the baseline's own 0.0094 spread. E1 and E13 are both mixed-sign (one seed favorable, two not), which is the same inconclusive shape Tier 1 and Tier 2 produced throughout — Batch B's design exists precisely to tell these two cases apart, and this run separates them. Per `docs/tier3-launch.md`, a same-sign result "is worth the confirmation eval even if the means overlap" — E9 σ=0.5 is therefore the first Tier 1-3 candidate with a positive case for §3.7's confirmation eval, on grounds Tier 1/2 could not have supported.
+
+Two things worth flagging rather than folding into the headline: E9 seed 2222 also shows the largest s-IoU in the whole batch (0.2838, +0.0428 over its own baseline seed) — echoes the E8 s-IoU-without-L1 pattern from §3.5, but is a different mechanism (train-time noise, not label smoothing) and hasn't been checked against the s-IoU floor here. And E1's seeds 2222 and 3333 selected earlier checkpoints (`125_5040`, `100_4040`) than every other Batch B row's `150_6040` — `best_checkpoint.py` picked them from the manifest, not hand-chosen, but it means E1's three seeds aren't even scoring the same epoch budget, which is a caveat worth carrying into any write-up of that row.
 
 **E6 is an audit, not a run, and the reason is worth stating.** The dead Perceiver parameters are constructed before several live modules, and every `nn.Linear` and `nn.Parameter` construction draws from the global RNG stream, so deleting them shifts the initialization of everything built afterwards. A "dead parameters removed" run therefore differs from baseline by an effective seed change, and the seed floor exceeds any effect in play, so it could not be read in either direction. `python scripts/dead_params.py` produces the count for §1.4 instead.
 
