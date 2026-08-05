@@ -28,7 +28,8 @@ This document covers both graded stages. It absorbs and replaces `archive/STAGE2
 | Results table | `RESULTS.csv` at the repo root, one row per scored checkpoint, rebuilt by `scripts/build_results_table.py`. 37 rows as of 2026-08-05 |
 | Two readings of that table (2026-08-05) | **(a)** Every single-seed delta in this document is quoted against `seedfloor_1111_chn` = 0.1725, the *worst* of the three baseline draws and 0.0046 above their mean. 21 of 26 candidates beat that anchor (sign test p = 0.0025); only 5 of 26 beat the mean. Every "largest delta" ranking here, including the one that chose Batch B, was computed against an unlucky draw. **(b)** The 26 candidates span 0.0101 in L1; three baseline seeds span 0.0094. Twenty-six draws should span ~2.3× the range of three, so the candidate-induced spread is roughly **half** the seed-induced one. Both in §3.2 |
 | Where Stage 2 landed | **E9 `enc_noise_std_train=0.5` is the single finalist.** Same-sign paired improvement at all three seeds on L1 *and* on s-IoU — six of six, on two metrics that correlate at only r = −0.335 across the table. **E1 is a same-sign negative result**, degrading s-IoU at all three seeds by 1.8× its own floor, the only effect anywhere in this project that exceeds its floor. §3.6 |
-| Next session | `docs/confirmation-launch.md`. Trains nothing: the σ_test ladder (never run), then E9's confirmation eval at `n_samples 50` with the paired per-font Wilcoxon (`scripts/paired_wilcoxon.py`, new 2026-08-05) |
+| Confirmation session | **Run and closed 2026-08-05** (`docs/confirmation-launch.md`). σ_test ladder null on both E9 and baseline (σ_test=1.0 stands, §8 item 9). `val_metric` doesn't predict the rendered metric (ρ=0.125, §3.2) — E14-deep cut to its two peak-lr rows. E9's confirmation eval, all three seeds, `n_samples 50`: **L1 −0.0040 vs baseline mean, s-IoU +0.0271**, paired Wilcoxon same-sign at all three seeds on both metrics (two of three strongly significant; seed 3333 the weak leg on both, as at screening). Table in §5 |
+| Next session | Stage 1 closeout (SSIM, quantization oracle, §2.4 prose — Mac-side, no cluster) and start writing §6 sections 1–3. English arm and E14-deep's two peak-lr rows if cluster time remains. See §9 |
 
 0.1668 sits essentially on DeepSVG's published Chinese number (0.167), so the baseline is inside the benchmark's range even though it does not reach the paper. §2.4 says how to write that up. It is not a blocker for Stage 2, which is measured against your own baseline rather than against 0.080.
 
@@ -85,6 +86,8 @@ Four places where the released code departs from the paper text. All four are le
 | Sec. 4.1 | the `N(0,I)` perturbation is an **inference-time** device simulating "the feature distortion caused by the human-designing uncertainty" | `x = x + torch.randn_like(x)` at `models/transformers.py:450`, applied unconditionally in training, validation and test | E9 |
 
 A fifth item is not a paper discrepancy but belongs in the same discussion. In `Transformer.forward` the loop unpacks `cross_attn, cross_ff, self_attns` and uses only `self_attns`. The cross-attention modules and `self.latents = nn.Parameter(torch.randn(256, 512))` are constructed, handed to the optimizer, and never called. With `depth=6` and `self_per_cross_attn=2` the encoder is 12 self-attention blocks and zero cross-attention blocks, so the model is not the Perceiver its configuration block advertises. The authors left a comment marking this as known.
+
+**Measured (2026-08-05), `scripts/dead_params.py`.** The dead cross-attention path (`latents`, `to_logits`, `to_patch_embedding`, `pre_lstm_fc`, both `layers[*]` and `layers_cnnsvg[*]` cross-attention and cross-feedforward blocks) totals **23,204,402 parameters against a 136,055,207-parameter model — 17.06% dead**, carried through Adam as 185.6 MB of moment state (fp32, two moments) that trains nothing. Not run as a candidate — see §3.6's E6 note for why an ablation of it cannot be read against the seed floor — but the count itself is a clean reconstruction finding for §1.4.
 
 ### 1.5 Known issues in the harness
 
@@ -356,6 +359,8 @@ Freeze the screening font list and `ref_char_ids` before the first run and never
 
 The caveat from §1.5 applies: **E8 and E13 change the cross-entropy itself**, so those two are always screened on the rendered metric regardless of what the correlation says.
 
+**Measured (2026-08-05).** `scripts/val_metric_correlation.py` across all 26 non-excluded Tier 1–3 runs: **Spearman ρ = 0.125**, Kendall τ = 0.083, rising only to ρ = 0.179 with E14/E15/E11 (the settling-confounded class from §3.2 (b)) dropped. Both readings are far under the 0.4 threshold this document set in advance. **`val_metric` does not predict the rendered metric on this model** — the teacher-forced loss and the autoregressive, best-of-N rollout diverge, which is itself the reportable finding §3.2 anticipated. Consequence for E14-deep: the batch shrinks from seven rows to the two peak-lr controls (`--lr 4e-4`, `--lr 8e-4`), which screen on the rendered metric regardless of the correlation result, per the rule set in the E14 note above. Every remaining candidate screens on the rendered metric, full stop — the cheap-proxy branch this section held open is closed.
+
 **One factor at a time, then combine.** Every run differs from the baseline in exactly one flag. Combine winners only at the end, and verify the combination beats each part alone. Interactions are real here: dropout, KL weight and encoder noise are all regularizers pulling on the same slack, and stacking three of them will likely underperform the best one.
 
 ### 3.3 Calibrate the budget before sizing the matrix
@@ -606,6 +611,8 @@ Caveat on both readings: the s-IoU differences are paired and read by sign, so t
 
 Take the winners that cleared the seed-noise floor, run them together, and run each ablation-of-the-combination so the report can say which parts survive contact with each other. Then the confirmation eval, 34 fonts at `n_samples 50`, on the baseline and on the combined model, with the paired Wilcoxon.
 
+**Run 2026-08-05.** Only one candidate ever earned a confirmation slot (§5), so there is no combination to take — "combined model" is E9 σ_train=0.5 alone. Confirmation eval run at all three seeds, `n_samples 50`, σ_test 1.0 (§8 item 9), paired Wilcoxon on both L1 and s-IoU. Results and both Wilcoxon passes are in §5. Along the way, `test_few_shot.py`'s per-font resume check (`if os.path.exists(merge_outfile): skip`) turned out to key only on the merge HTML's existence, not on what `--n_samples` produced it — the seed-2222 and seed-3333 pairs initially silently reran on stale `n_samples=3` screening output left over from Tier 3, mislabeled as the n=50 confirmation. Caught by the 0 vs 34 "skipping" line count and the numbers matching `RESULTS.csv`'s screening rows exactly; fixed by clearing `results/<ckpt>/` before rerunning. Worth a line in §7 as a landmine distinct from the ones already in §1.5: any rerun of `test_few_shot.py` at a different `--n_samples` against an experiment directory that already has output needs its `results/<ckpt>/` cleared first, or it silently scores the old budget.
+
 ---
 
 ## 4. Schedule
@@ -650,32 +657,48 @@ English is out of scope unless days 9 to 11 come in early. If it fits, run only 
 
 One row per candidate, so the sweep itself is the evidence.
 
-**The finalist arrived 2026-08-05.** This table is confirmation-budget numbers (`n_samples
-50`, all 34 fonts) for finalists only, per §3.2's "screen cheap, confirm expensive" split.
-It stayed empty through Tiers 1 and 2 because nothing had earned a confirmation run.
-Tier 3 Batch B produced one: **E9 `enc_noise_std_train=0.5`**, same-sign paired improvement
-at all three seeds on L1 and on s-IoU alike (§3.6). The six rows below are what
-`docs/confirmation-launch.md` fills.
+**Filled 2026-08-05, `docs/confirmation-launch.md`.** This table is confirmation-budget
+numbers (`n_samples 50`, all 34 fonts) for finalists only, per §3.2's "screen cheap, confirm
+expensive" split. It stayed empty through Tiers 1 and 2 because nothing had earned a
+confirmation run. Tier 3 Batch B produced one: **E9 `enc_noise_std_train=0.5`**, same-sign
+paired improvement at all three seeds on L1 and on s-IoU alike (§3.6).
+
+**σ_test = 1.0** (the released default). Both the E9 and the baseline σ_test ladders (six
+points each, `scripts/sigma_test_sweep.sh`) landed in Rule 1's first case: neither improves
+on σ_test=1.0 by more than the 0.0011 decode-noise band (E9's own best point, σ=1.5, gains
+only +0.0003; baseline's own best point *is* σ=1.0). The knob was untuned and checking it
+changed nothing — recorded as a measured null.
 
 Screening-budget numbers (`n_samples 3`) live in §3.2, §3.5 and §3.6 and in `RESULTS.csv`,
 and are **not comparable to anything in this table** — the §3.2 `n_samples` ladder showed a
 systematic best-of-N drop from 0.1722 at n=3 to 0.1678 at n=20, larger than any candidate
 delta in the project. Never mix the two.
 
-| Row | n_samples | Error (L1) ↓ | SSIM ↑ | s-IoU ↑ | Render % | Wilcoxon p |
+| Row | n_samples | Error (L1) ↓ | SSIM ↑ | s-IoU ↑ | Render % | Wilcoxon p (L1, HL shift) |
 |---|---|---|---|---|---|---|
 | Paper, reported (CN) | 50 | 0.080 | — | — | — | — |
 | Paper, DeepSVG (CN) | — | 0.167 | — | — | — | — |
 | Quantization oracle (floor, 128-bin grid) | — | | | | | — |
-| **Baseline, seed 1111** | 50 | | | | | — |
-| **Baseline, seed 2222** | 50 | | | | | — |
-| **Baseline, seed 3333** | 50 | | | | | — |
-| Baseline mean of three seeds | 50 | | | | | — |
-| **E9 σ_train = 0.5**, seed 1111 | 50 | | | | | |
-| **E9 σ_train = 0.5**, seed 2222 | 50 | | | | | |
-| **E9 σ_train = 0.5**, seed 3333 | 50 | | | | | |
-| E9 mean of three seeds | 50 | | | | | |
+| **Baseline, seed 1111** | 50 | 0.1662 | | 0.2545 | 34/34 | — |
+| **Baseline, seed 2222** | 50 | 0.1569 | | 0.2716 | 34/34 | — |
+| **Baseline, seed 3333** | 50 | 0.1632 | | 0.2781 | 34/34 | — |
+| Baseline mean of three seeds | 50 | 0.1621 | | 0.2681 | 34/34 | — |
+| **E9 σ_train = 0.5**, seed 1111 | 50 | 0.1588 | | 0.2870 | 34/34 | 0.0012 (−0.0074) |
+| **E9 σ_train = 0.5**, seed 2222 | 50 | 0.1531 | | 0.3170 | 34/34 | 0.0437 (−0.0039) |
+| **E9 σ_train = 0.5**, seed 3333 | 50 | 0.1623 | | 0.2816 | 34/34 | 0.3050 (−0.0011) |
+| E9 mean of three seeds | 50 | 0.1581 | | 0.2952 | 34/34 | all same sign |
 | *Reference: Stage 1 reconstruction, epoch 135* | 50 | 0.1641 | | 0.2467 | 33/34 | — |
+
+**Delta vs baseline mean: L1 −0.0040, s-IoU +0.0271.** Smaller than the screening-budget
+delta (−0.0059 L1) but the same direction, at four times the sample count per glyph.
+
+**s-IoU paired Wilcoxon (same three seeds, not pooled, `--metric iou`):** seed 1111
+p=0.0001 (HL +0.0317), seed 2222 p=0.0000 (HL +0.0453), seed 3333 p=0.4417 (HL +0.0045) —
+all three same sign, two strongly significant. Per §3.6's r=−0.335 finding, L1 and s-IoU are
+close to independent instruments here, so a candidate moving both favourably at every seed
+(six of six paired sign tests, two metrics) is doing more than moving one number. Seed 3333
+is the weak leg on both metrics — consistent with it being the smallest-margin seed at
+screening budget too (§3.6).
 
 Rules for filling it, so the table cannot mislead the way the screening tables did:
 
@@ -804,6 +827,8 @@ These are yours. The plan does not commit to them.
 
 9. ~~**What to do with the σ_test result.**~~ **Resolved 2026-08-05, before the sweep runs: re-screen the finalists only, caveat the rest.** The full rule, with all three cases, is in `docs/confirmation-launch.md` under "Rule 1" and is pre-committed there so it cannot be chosen to suit the outcome. In summary: a shift counts only if it beats σ=1.0 by more than the 0.0011 decode noise; if **both** ladders (E9's and the baseline's) shift to the same σ\*, that is a property of the eval procedure and the six finalist rows are re-measured at σ\* while Tiers 1–3 stay at 1.0 with a stated caveat; if only **one** ladder shifts, that is a σ_train × σ_test interaction rather than a free win, and the confirmation eval runs at σ_test = 1.0 regardless, because tuning the eval on the candidate's own ladder would confirm E9 on a footing it was never screened on. Running the sweep on the baseline as well as on E9 exists precisely to tell those two cases apart.
 
+   **Run 2026-08-05.** Both six-point ladders landed in the rule's first case: neither improves on σ=1.0 by more than the 0.0011 decode-noise band (E9's best point, σ=1.5, is +0.0003 over σ=1.0; the baseline's own best point *is* σ=1.0). No re-screen triggered, no caveat needed on any existing table. σ_test = 1.0 for the confirmation eval in §5.
+
    *Original item, kept for provenance.* New 2026-08-04. `scripts/sigma_test_sweep.sh` is eval-only and answers a question §3.4 raised and §4 scheduled. If the optimum σ_test differs from the released 1.0 by more than the 0.0011 decode noise, every number in the results table was taken at an arbitrary point on that curve and the screening comparisons need re-running at the better value. That is cheap for the eval but it invalidates the table as a *set*, so decide before running whether a shifted optimum triggers a re-screen or gets reported as a caveat.
 
 10. **How much of the remaining budget goes to more candidates.** New 2026-08-05, and the one live scope question. §3.2's two 2026-08-05 measurements say the candidate-induced spread is about half the seed-induced spread, and that the leading single-seed candidate survived replication 1 time in 3. Both point the same way: another breadth batch buys single points in a setup that has now been shown twice over not to resolve them. Scope confirmed 2026-08-05 as **Stage 1 closeout and the report, plus the English arm and E14-deep** — E14-deep because its two peak-lr rows change *which* optimum is reached rather than how tightly the weights settle into it, and English because a second script is a generalization claim rather than a twentieth single point. `e2_batchnorm_chn` and `e12_kl000_chn` are explicitly **not** promoted to a replication batch: they are the same kind of single-seed leader Batch B just showed to be 2/3 misleading.
@@ -814,9 +839,9 @@ These are yours. The plan does not commit to them.
 
 **Current, as of 2026-08-05 (day 3).** The list below is day 1's and is kept for provenance; every item on it is done. Today's next actions:
 
-1. **Next cluster session: `docs/confirmation-launch.md`.** It trains nothing. Two CPU items (`val_metric_correlation.py`, which gates E14-deep, and `dead_params.py`), then the σ_test ladder on E9 *and* the baseline, then E9's confirmation eval at `n_samples 50` across three seeds, then `scripts/paired_wilcoxon.py`. Rule 1 in that document is pre-committed and must be read before step 2 produces a number.
+1. ~~**Next cluster session: `docs/confirmation-launch.md`.**~~ **Run and closed 2026-08-05.** Both CPU items done (`val_metric_correlation.py`: ρ=0.125, doesn't predict the rendered metric, cuts E14-deep to two rows; `dead_params.py`: 17.06% dead, §1.4). σ_test ladder null on both arms, σ_test=1.0 stands (§8 item 9). E9's confirmation eval, three seeds, `n_samples 50`, plus `scripts/paired_wilcoxon.py` on L1 and s-IoU — results in §5. One landmine found and fixed along the way: `test_few_shot.py`'s resume-skip check ignores `--n_samples`, so two of the six confirmation runs initially silently rescored stale `n_samples=3` output (§3.7).
 2. **Mac-side, no cluster: close Stage 1.** SSIM in `eval_reconstruction_error.py`, then rescore. The quantization oracle on the 128-bin grid — still no script, and it is now the last thing standing between Stage 1 and being written up. §2.4 in prose: why 0.1668 and not 0.080, with two of four explanations already ruled out.
-3. **Start writing.** §6 sections 1 to 3 can be written today from §1, §2 and `RESULTS.csv`. Section 6's discussion now has three measured findings to carry it rather than an argument: what the anchor bias did to the rankings (§3.2), that architectural change moves the metric about half as much as the seed does (§3.2), and that L1 and s-IoU are nearly independent instruments at r = −0.335 (§3.6).
+3. **Start writing.** §6 sections 1 to 3 can be written today from §1, §2 and `RESULTS.csv`. Section 6's discussion now has four measured findings to carry it rather than an argument: what the anchor bias did to the rankings (§3.2), that architectural change moves the metric about half as much as the seed does (§3.2), that L1 and s-IoU are nearly independent instruments at r = −0.335 (§3.6), and that E9's confirmation-budget gain replicates the screening-budget direction on both metrics at reduced but still same-sign magnitude (§5).
 4. **English arm** (`docs/english-arm.md`) and **E14-deep** are in scope per §8 item 10. English starts with a 6-epoch timing run that can share a wave with the eval steps in item 1; E14-deep waits on the correlation from item 1.
 
 *Day 1's list, kept for provenance:*
