@@ -158,7 +158,19 @@ def score_font(font_dir, grids, char_num, max_seq_len, img_size, ev, render):
         one[:, :, 4:] = round_trip(one[:, :, 4:], g)
         for c in range(char_num):
             try:
-                svg = render(one[c])
+                # The 8 relaxed args are [start_x, start_y, c1x, c1y, c2x, c2y, end_x,
+                # end_y] -- a redundant 4th control point kept only for the relaxation
+                # consistency loss (models/model_main.py). render()'s
+                # _make_simple_cmds_long expects the original released code's 6-arg
+                # layout (c1, c2, end) and was never updated for the 8-arg relaxation,
+                # so the redundant start point must be dropped before rendering, same
+                # as model_main.py's `args2[:, :, 2:]` does for the model's own output.
+                # Skipping this drops the true endpoint instead (silently, no
+                # exception) and renders a visible stray stroke from the discarded
+                # coordinate -- caught 2026-08-05 by comparing a re-rendered
+                # ground-truth glyph against a real scored SVG from the same font.
+                render_input = np.concatenate([one[c, :, :4], one[c, :, 6:]], axis=-1)
+                svg = render(render_input)
                 synth = ev.render_svg_mask(svg, img_size)
             except Exception:
                 continue

@@ -20,7 +20,7 @@ This document covers both graded stages. It absorbs and replaces `archive/STAGE2
 | Best measured number | Chinese Error (L1) **0.1668**, mean IoU 0.2550, over 34 fonts and 1768 glyphs, at epoch 125 |
 | Paper's Chinese number | **0.080** |
 | Paper metric implemented | Yes, `eval_reconstruction_error.py` |
-| Missing for Stage 1 | SSIM, quantization oracle (renderability, per-font CSV and the bin histogram landed) |
+| Stage 1 | **Closed 2026-08-05.** SSIM and the quantization oracle both landed (§2.3, §2.5); renderability, per-font CSV and the bin histogram were already in |
 | Stage 2, Tier 1 | Run and screened 2026-08-04. Nothing cleared the noise floor; see §3.2 |
 | Stage 2, Tier 2 | Run and screened 2026-08-04. Nothing cleared the noise floor either; see §3.5. E8's s-IoU shift was flagged as the one follow-up worth budget, then **closed 2026-08-04** without a GPU: it sits at the s-IoU seed floor, not above it |
 | Stage 2, Tier 3 | Run and screened 2026-08-04. Fifteen runs (one dropped at rung 1). Batch A (breadth): null, like Tiers 1 and 2. Batch B (three seeds each on the three largest prior deltas): E9 σ=0.5 is the first candidate with same-sign L1 improvement at all three seeds; E1 and E13 are mixed-sign. See §3.6 |
@@ -30,7 +30,7 @@ This document covers both graded stages. It absorbs and replaces `archive/STAGE2
 | Deltas are generated, not typed (2026-08-05) | `scripts/recompute_deltas.py` regenerates every screening delta from `RESULTS.csv` against the corrected anchor (**0.1728** L1 / 0.2240 s-IoU), with a *vs anchor* and a *vs three-seed mean* column. **Floors: L1 0.0097, s-IoU 0.0315.** The hand-typed tables in §3.2, §3.5 and §3.6 are kept for provenance because they are what every ranking decision was made on; **the script wins on conflict.** Why the anchor moved is in §3.2 |
 | Where Stage 2 landed | **E9 `enc_noise_std_train=0.5` is the single finalist.** Same-sign paired improvement at all three seeds on L1 *and* on s-IoU — six of six, on two metrics that correlate at only r = −0.335 across the table. **E1 is a same-sign negative result**, degrading s-IoU at all three seeds by 1.8× its own floor, the only effect anywhere in this project that exceeds its floor. §3.6 |
 | Confirmation session | **Run and closed 2026-08-05** (`docs/confirmation-launch.md`). σ_test ladder null on both E9 and baseline (σ_test=1.0 stands, §8 item 9). `val_metric` doesn't predict the rendered metric (ρ=0.125, §3.2) — E14-deep cut to its two peak-lr rows. E9's confirmation eval, all three seeds, `n_samples 50`: **L1 −0.0040 vs baseline mean, s-IoU +0.0271**, paired Wilcoxon same-sign at all three seeds on both metrics (two of three strongly significant; seed 3333 the weak leg on both, as at screening). Table in §5 |
-| Next session | Stage 1 closeout (SSIM, quantization oracle, §2.4 prose — Mac-side, no cluster) and start writing §6 sections 1–3. English arm and E14-deep's two peak-lr rows if cluster time remains. See §9 |
+| Next session | **Stage 1 closeout run 2026-08-05.** SSIM landed, oracle run (and a bug in the new oracle script caught and fixed along the way — see §2.3), §2.4 updated. Next: write REPORT.md §6 sections 1–3 from real numbers (drafted with `[PENDING]` markers, now fillable), then English arm and E14-deep's two peak-lr rows if cluster time remains. See §9 |
 
 0.1668 sits essentially on DeepSVG's published Chinese number (0.167), so the baseline is inside the benchmark's range even though it does not reach the paper. §2.4 says how to write that up. It is not a blocker for Stage 2, which is measured against your own baseline rather than against 0.080.
 
@@ -213,6 +213,23 @@ L1(n=128) - L1(n=256)    the ceiling on what E13 could ever have bought
 
 Quoting the raw oracle as "the quantization floor" without subtracting the pipeline term would attribute the whole residual to quantization. That is the same class of mistake as anchoring every delta on one seed, one level down, and it is worth a sentence in §6 next to the anchor bias for exactly that reason. The third line is the one that retires E13: it is an upper bound on a candidate that already screened null, computed without training anything.
 
+**Run 2026-08-05, and a bug caught before it reached the table.** The first run of `scripts/quantization_oracle.py` (34 Chinese test fonts, 1768 glyphs) printed a pipeline floor of L1 = 0.1939 — *larger* than the trained model's own confirmation-budget score (0.1621 three-seed mean), which is not a coherent reading for a floor: the oracle replays the exact ground-truth sequence, so nothing should beat it. A rendered side-by-side of two glyphs (`char3`, `char7` of test font 19) showed why: every reconstructed glyph carried a spurious thin stroke from a corner of the canvas into the shape.
+
+Traced to a real bug in the new script, not in the thirteen days of results behind it. The relaxed representation's 8 args per command are `[start_x, start_y, c1x, c1y, c2x, c2y, end_x, end_y]` — a redundant 4th control point (the start) kept only so the relaxation-consistency loss has something to constrain. `render()`'s `_make_simple_cmds_long` (unchanged from the original released code, confirmed identical in `data_utils/svg_utils_backup.py`) was written for that code's 6-arg predecessor and was never updated for the 8-arg relaxation: fed 8 args, it reads `arguments[8],[9]` for a Move/Line target and gets the *unsupervised* `c2x, c2y` slack values instead of the true `end_x, end_y` (`cmd_args_mask` never trains positions 2–5 for those command types), and for a Curve it shifts every control point back by one, silently dropping the true endpoint. `models/model_main.py:130` already knows this — `sampled_svg_2 = torch.cat([commands2, args2[:, :, 2:]], dim=-1)` explicitly drops the redundant start point before calling `render()` for every SVG `test_few_shot.py` has ever scored. `scripts/quantization_oracle.py` skipped that trim, since it reads `sequence_relaxed.npy` directly rather than going through the model's decode path. Confirmed the production path is unaffected: `experiments/seedfloor_1111_chn_main_model/results/150_6040.ckpt/0025/svgs_single/syn_50_23_refined.svg` — an actual scored file — rendered clean with no artifact. **This bug is confined to the oracle script written today; it does not touch any Tier 1–3, seed-floor, or confirmation number in this document.**
+
+Fixed by the same trim `model_main.py` uses (`scripts/quantization_oracle.py`'s `score_font`, one line). Self-test still 18/18 after the fix (it only checks the quantization arithmetic, not this rendering path, so it couldn't have caught this — worth remembering next time a script's self-test looks green but its output doesn't). Re-rendering the same two glyphs confirmed the hairline gone and a plausible-looking reconstruction underneath it.
+
+Re-run, 34 fonts / 1768 glyphs, corrected:
+
+| Grid | Bin px | L1 | s-IoU | SSIM |
+|---|---|---|---|---|
+| n = ∞ (pipeline floor) | — | **0.1422** | 0.3713 | 0.4916 |
+| n = 256 | 0.3125 | 0.1427 | 0.3698 | 0.4911 |
+| n = 128 (released) | 0.6250 | 0.1443 | 0.3664 | 0.4884 |
+| n = 64 | 1.2500 | 0.1453 | 0.3642 | 0.4834 |
+
+This is now a coherent floor: 0.1422 sits *below* the three-seed baseline mean of 0.1621, as a floor should. Cost of quantization at the released grid, pipeline floor subtracted: **L1 +0.0021** at n=128, +0.0031 at n=64. **Ceiling on E13 (128→256 bins): L1 +0.0016**, well under the 0.0097 seed floor — E13 could not have cleared the floor no matter how it landed, which is consistent with (and now explains) its null screening result. Per-font rows in `oracle_chn.csv`.
+
 ### 2.4 The gap to 0.080, and how to write about it
 
 Your 0.1668 against the paper's 0.080 is roughly double. **This is not a crisis and it does not need solving.** The assignment allows reporting that the paper's numbers were not reproduced, and 0.1668 sits almost exactly on DeepSVG's published Chinese result of 0.167, so the model is landing inside the benchmark's own range rather than somewhere unexplainable. Report the number, say what plausibly accounts for it, and move on.
@@ -250,9 +267,13 @@ So the honest sentence for the report is not "we do not know why". It is: **the 
 
 **What this does not license.** None of the above is a claim that training longer would reach 0.080, and no run was made to test it. Confirming it would cost a 600-epoch Chinese run, roughly four hours, and it would answer a Stage 1 question with budget that Stage 2 has better uses for. It is written up as the leading explanation with its evidence and its status stated, which is what §2.4 said to do from the start. If cluster time is idle at the end, one 600-epoch seed-1111 run is the cheapest way to convert this paragraph from an argument into a measurement, and the §5 table has a row waiting for it.
 
+**Does the pipeline floor add a fifth explanation? No — it narrows the training-budget one.** §2.3's oracle (measured 2026-08-05, after a rendering bug in the oracle script itself was caught and fixed) puts the pipeline floor at L1 = 0.1422, *below* the three-seed baseline mean of 0.1621. A floor above the model's own score would have meant part of the gap to 0.080 was structurally unreachable regardless of training; a floor this far below it means the opposite — the model has not yet used up the headroom the representation and rasterizer allow, which is exactly what "still improving when the budget ends" predicts. Quantization proper adds only +0.0021 at the released 128-bin grid on top of that floor (§2.3), so between them the representation and quantization together account for a small, now-measured slice of the 0.087 gap, and training budget remains the explanation carrying the rest.
+
 ### 2.5 Stage 1 closes when
 
 The extended eval script runs on the existing Chinese results and emits Error, SSIM, s-IoU, renderability, and a per-font CSV; the oracle row and bin histogram exist; and §2.4 has an answer. It can then be written up while Stage 2 trains.
+
+**Closed 2026-08-05.** SSIM lands in the §5 table for all six confirmation rows (bit-identical L1/s-IoU rescore, so nothing but the new column moved), the oracle row is filled with a bug caught and fixed along the way (§2.3), the bin histogram has been in since day 1, and §2.4 has its answer with the oracle's pipeline floor folded in. Report §6 sections 1–3 can now be written from real numbers.
 
 ---
 
@@ -740,19 +761,28 @@ delta in the project. Never mix the two.
 |---|---|---|---|---|---|---|
 | Paper, reported (CN) | 50 | 0.080 | — | — | — | — |
 | Paper, DeepSVG (CN) | — | 0.167 | — | — | — | — |
-| Quantization oracle (floor, 128-bin grid) | — | | | | | — |
-| **Baseline, seed 1111** | 50 | 0.1662 | | 0.2545 | 34/34 | — |
-| **Baseline, seed 2222** | 50 | 0.1569 | | 0.2716 | 34/34 | — |
-| **Baseline, seed 3333** | 50 | 0.1632 | | 0.2781 | 34/34 | — |
-| Baseline mean of three seeds | 50 | 0.1621 | | 0.2681 | 34/34 | — |
-| **E9 σ_train = 0.5**, seed 1111 | 50 | 0.1588 | | 0.2870 | 34/34 | 0.0012 (−0.0074) |
-| **E9 σ_train = 0.5**, seed 2222 | 50 | 0.1531 | | 0.3170 | 34/34 | 0.0437 (−0.0039) |
-| **E9 σ_train = 0.5**, seed 3333 | 50 | 0.1623 | | 0.2816 | 34/34 | 0.3050 (−0.0011) |
-| E9 mean of three seeds | 50 | 0.1581 | | 0.2952 | 34/34 | all same sign |
-| *Reference: Stage 1 reconstruction, epoch 135* | 50 | 0.1641 | | 0.2467 | 33/34 | — |
+| Quantization oracle, pipeline floor (n = ∞) | — | 0.1422 | 0.4916 | 0.3713 | 34/34 | — |
+| Quantization oracle, 128-bin grid (released) | — | 0.1443 | 0.4884 | 0.3664 | 34/34 | — |
+| **Baseline, seed 1111** | 50 | 0.1662 | 0.4375 | 0.2545 | 34/34 | — |
+| **Baseline, seed 2222** | 50 | 0.1569 | 0.4487 | 0.2716 | 34/34 | — |
+| **Baseline, seed 3333** | 50 | 0.1632 | 0.4413 | 0.2781 | 34/34 | — |
+| Baseline mean of three seeds | 50 | 0.1621 | 0.4425 | 0.2681 | 34/34 | — |
+| **E9 σ_train = 0.5**, seed 1111 | 50 | 0.1588 | 0.4474 | 0.2870 | 34/34 | 0.0012 (−0.0074) |
+| **E9 σ_train = 0.5**, seed 2222 | 50 | 0.1531 | 0.4576 | 0.3170 | 34/34 | 0.0437 (−0.0039) |
+| **E9 σ_train = 0.5**, seed 3333 | 50 | 0.1623 | 0.4388 | 0.2816 | 34/34 | 0.3050 (−0.0011) |
+| E9 mean of three seeds | 50 | 0.1581 | 0.4479 | 0.2952 | 34/34 | all same sign |
+| *Reference: Stage 1 reconstruction, epoch 135* | 50 | 0.1641 | — | 0.2467 | 33/34 | — |
 
 **Delta vs baseline mean: L1 −0.0040, s-IoU +0.0271.** Smaller than the screening-budget
 delta (−0.0059 L1) but the same direction, at four times the sample count per glyph.
+
+**SSIM, added 2026-08-05: +0.0054 (0.4425 → 0.4479), same direction as the other two
+metrics.** Rescored from the existing confirmation-eval SVGs with no re-decoding — L1 and
+s-IoU came back bit-identical to the values above, which is the check that the rescore is
+trustworthy. Smallest of the three deltas in relative terms, consistent with SSIM's
+anti-aliased Gaussian window smoothing over exactly the sub-pixel placement noise §1.2 says
+the other two metrics cannot see, so a candidate that helps structure more than it helps
+raw pixel placement would be expected to show up more on s-IoU than on SSIM.
 
 **s-IoU paired Wilcoxon (same three seeds, not pooled, `--metric iou`):** seed 1111
 p=0.0001 (HL +0.0317), seed 2222 p=0.0000 (HL +0.0453), seed 3333 p=0.4417 (HL +0.0045) —

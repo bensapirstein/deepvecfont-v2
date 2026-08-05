@@ -3,11 +3,15 @@
 Ben Sapirstein · Generative Models for Text and Images, Reichman University · August 2026
 
 > **Drafting note, delete before submission.** Sections 1 to 3 are written. Sections 4 to 6
-> are laid in against real numbers with the two gaps marked `[PENDING]`, both of which are
-> filled by `docs/stage1-closeout.md` on the cluster: the SSIM column and the quantization
-> oracle row. Drafted back to front from §5 and §6 so the early sections set up exactly what
-> the discussion needs. Every number here is traceable to `RESULTS.csv` or to a dated
-> **Measured** paragraph in `PROJECT_PLAN.md`; nothing is typed twice by hand.
+> carry real numbers throughout but the connecting prose is still an outline in most places
+> (backtick-bracketed notes to self) — that write-up is scheduled for later in §4's revised
+> schedule, not this session. The two gaps that *were* today's blockers, the SSIM column and
+> the quantization oracle row, are filled: both landed 2026-08-05 via `docs/stage1-closeout.md`
+> on the cluster (see `PROJECT_PLAN.md` §2.3 for a rendering bug caught and fixed in the new
+> oracle script along the way — confined to that script's first run, it does not touch any
+> Tier 1–3, seed-floor, or confirmation number). Every number here is traceable to
+> `RESULTS.csv` or to a dated **Measured** paragraph in `PROJECT_PLAN.md`; nothing is typed
+> twice by hand.
 
 ---
 
@@ -162,12 +166,12 @@ right place. Two further properties matter:
 | Paper, DeepVecFont-v2 (CN) | 50 | 0.080 | | | |
 | Paper, DeepVecFont (CN) | | 0.086 | | | |
 | Paper, DeepSVG (CN) | | 0.167 | | | |
-| Quantization oracle, pipeline floor (n = ∞) | | `[PENDING]` | `[PENDING]` | `[PENDING]` | |
-| Quantization oracle, 128-bin grid | | `[PENDING]` | `[PENDING]` | `[PENDING]` | |
-| **This reproduction, seed 1111** | 50 | 0.1662 | `[PENDING]` | 0.2545 | 34/34 |
-| **This reproduction, seed 2222** | 50 | 0.1569 | `[PENDING]` | 0.2716 | 34/34 |
-| **This reproduction, seed 3333** | 50 | 0.1632 | `[PENDING]` | 0.2781 | 34/34 |
-| **Three-seed mean** | 50 | **0.1621** | `[PENDING]` | **0.2681** | 34/34 |
+| Quantization oracle, pipeline floor (n = ∞) | | 0.1422 | 0.4916 | 0.3713 | 34/34 |
+| Quantization oracle, 128-bin grid | | 0.1443 | 0.4884 | 0.3664 | 34/34 |
+| **This reproduction, seed 1111** | 50 | 0.1662 | 0.4375 | 0.2545 | 34/34 |
+| **This reproduction, seed 2222** | 50 | 0.1569 | 0.4487 | 0.2716 | 34/34 |
+| **This reproduction, seed 3333** | 50 | 0.1632 | 0.4413 | 0.2781 | 34/34 |
+| **Three-seed mean** | 50 | **0.1621** | **0.4425** | **0.2681** | 34/34 |
 
 Renderability is reported because it is silently rewarded otherwise. `test_few_shot.py`
 wraps its rasterizer in a bare `except: continue`, and a model that fails on hard glyphs gets
@@ -204,6 +208,18 @@ But §2.2 measured the largest of them: the whole best-of-N budget range is wort
 and the reported figure is already taken at N = 50, the top of it. Granting the paper an
 unstated advantage of similar size on the other two puts the entire protocol surface at
 roughly 0.01 against a gap of 0.087. **Protocol accounts for a tenth of the gap at most.**
+
+**A fifth candidate, checked and folded in rather than left open: representation and
+rasterizer loss.** Section 2.3's oracle renders the *exact* ground-truth relaxed sequence
+through the same pipeline the model is scored with, so its L1 is the best any model working
+in this representation could ever achieve. It comes out to 0.1422 at n = ∞ (no quantization
+at all) and 0.1443 at the released 128-bin grid — both *below* the three-seed reproduction
+mean of 0.1621. A floor above the model's own score would have meant part of the 0.087 gap
+was structurally unreachable; a floor this far below it means the opposite; the model has not
+used up the headroom the representation already allows, which is what an undertrained model
+looks like. Quantization proper costs only 0.0021 of that (0.1443 − 0.1422). Between them,
+representation and quantization account for a small, now-measured sliver of the gap, and
+training budget carries the rest.
 
 **Not eliminated, and sufficient alone: training budget.** The baseline ran 125 epochs and
 the seed-floor runs 150. Three observations point the same way and none required an
@@ -382,10 +398,15 @@ in the whole table by a wide margin.]`
    shrink at confirmation budget, exactly as the noise decomposition predicted.
 
 `Then: what the metric cannot see (§2.2) and what the oracle floor implies about the ceiling
-on any coordinate-level change, including the E13 upper bound. Then the floor-estimation
-point: a floor computed from three points is itself noisy, and s-IoU's moved from 0.0401 to
-0.0315 on re-measurement, which is the anchor bias one level up. Close with the flow-matching
-head as future work, citing` archive/FLOW_MATCHING_PLAN.md`.]`
+on any coordinate-level change, including the E13 upper bound. Numbers, measured 2026-08-05
+(PROJECT_PLAN.md §2.3): pipeline floor (n=inf) L1 0.1422, below the three-seed baseline mean
+of 0.1621 -- a floor a model can still close by training more, not a wall. Quantization cost
+at the released 128-bin grid is only +0.0021 over that floor. The E13 upper bound (128 to 256
+bins) is +0.0016, under the 0.0097 seed floor -- E13 could not have cleared it no matter how
+it landed, which is why it screened null. Then the floor-estimation point: a floor computed
+from three points is itself noisy, and s-IoU's moved from 0.0401 to 0.0315 on re-measurement,
+which is the anchor bias one level up. Close with the flow-matching head as future work,
+citing` archive/FLOW_MATCHING_PLAN.md`.]`
 
 ## 7. References
 
