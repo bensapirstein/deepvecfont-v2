@@ -53,9 +53,22 @@ BATCH = {
 # Eval budget (--n_samples) each experiment was screened/confirmed at.
 # Everything not listed defaults to 3, the screening budget every Tier
 # 1-3 candidate has used since scripts/test_experiments.sh was introduced.
+#
+# This map is per-EXPERIMENT and is therefore only correct while an experiment
+# has been scored at exactly one budget. The confirmation eval breaks that:
+# seedfloor_1111_chn and e9_sigma050_chn are each scored at n_samples 3
+# (screening) and at n_samples 50 (confirmation), and §3.2's rule is that a
+# screening number and a confirmation number must never be compared. So the
+# budget is read off the CSV *filename* first -- write confirmation output to
+#     results/eval_<ckpt>_n50.csv   (--csv_out on eval_reconstruction_error.py)
+# and this map is only the fallback for files with no suffix.
 N_SAMPLES = {
     "dvf_base_exp_chn": 50,  # Stage 1 confirmation budget, matches the paper
 }
+
+# eval_<ckpt>_n<N>.csv -> (ckpt, N). Anything without the suffix falls back to
+# the N_SAMPLES map above and keeps its filename as the checkpoint label.
+CKPT_NSAMPLES_RE = re.compile(r"^(?P<ckpt>.+?)_n(?P<n>\d+)$")
 
 NOTES = {
     "e1_norm_chn": "re-screened as tier3b seed-1111 anchor",
@@ -99,6 +112,11 @@ def main():
         for csv_name in sorted(csvs):
             csv_path = os.path.join(results_dir, csv_name)
             checkpoint = csv_name[len("eval_") : -len(".csv")]
+            n_samples = None
+            m_ns = CKPT_NSAMPLES_RE.match(checkpoint)
+            if m_ns:
+                checkpoint = m_ns.group("ckpt")
+                n_samples = int(m_ns.group("n"))
             m = CKPT_EPOCH_RE.match(checkpoint)
             epoch = int(m.group(1)) if m else ""
 
@@ -138,7 +156,8 @@ def main():
                     "language": language,
                     "checkpoint": checkpoint,
                     "epoch": epoch,
-                    "n_samples": N_SAMPLES.get(name_exp, 3),
+                    "n_samples": n_samples if n_samples is not None
+                                 else N_SAMPLES.get(name_exp, 3),
                     "n_fonts": n_fonts,
                     "fonts_rendered": fonts_rendered,
                     "glyphs_expected": glyphs_expected,

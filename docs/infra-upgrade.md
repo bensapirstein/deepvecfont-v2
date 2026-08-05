@@ -127,6 +127,20 @@ correctly called a COMB, one that was not is correctly called FILLED.
 
 ### 7. Also touched
 
+- **Cluster environment, recorded retroactively 2026-08-05.** Two packages had to be installed
+  into the `dvf_v2` conda env beyond what the upstream repo declares: `wandb` (day 1, expected)
+  and **`matplotlib`** (day 1, not expected — `scripts/bin_histogram.py` imports it to write
+  `bin_histogram_chn_train.png`, and that import was the first thing to fail on a fresh env).
+  Neither is in any requirements file. If the env is ever rebuilt, or if this is reproduced on
+  another machine for the report, both are needed:
+
+  ```bash
+  conda activate dvf_v2 && pip install wandb matplotlib && wandb login
+  ```
+
+  Worth a line in the report's reproduction section: the released repo ships no dependency
+  manifest at all, so the working environment was assembled by running things until they stopped
+  failing. That is a legitimate reconstruction finding, not just housekeeping.
 - `.gitignore`: added `wandb/`, the local run directory wandb creates in the repo root.
 - `scripts/check_infra.py`: new, see below.
 - `STAGE2_EXPERIMENTS.md` moved to `archive/` with a superseded header; `PROJECT_PLAN.md` created
