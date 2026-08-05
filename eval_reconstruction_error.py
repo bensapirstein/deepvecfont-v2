@@ -223,6 +223,31 @@ def resolve_font_dirs(exp_dir, name_ckpt=None):
     return font_dirs, 'per-checkpoint', chosen
 
 
+# --gt_source, added 2026-08-05, and why it exists
+# ------------------------------------------------
+# Every number in this project before today scored the candidate against
+# `imgs/{i}_gt.png`, which test_few_shot.py writes from `data['rendered']`: the
+# dataset's own pre-rendered raster, produced by the paper's preprocessing pipeline.
+# The candidate, by contrast, is an SVG rendered here through cairosvg. So the two
+# sides of every comparison come from two different rasterizers.
+#
+# scripts/quantization_oracle.py measured what that costs. Pushing the UNMODIFIED
+# ground-truth outline through cairosvg and scoring it against the stored raster
+# gives L1 = 0.1422 -- 14% of pixels disagree before any model is involved. The
+# paper reports 0.080 for its trained model, which is well below that. Under this
+# scoring definition the paper's number is unreachable in principle.
+#
+# `--gt_source svg` scores against the ground-truth OUTLINE rendered through the
+# same cairosvg path as the candidate, so both sides share a rasterizer and the
+# floor collapses to whatever the model itself gets wrong. If the released
+# checkpoints score near 0.080 this way and near 0.16 the other way, the gap was a
+# definition of the metric rather than a failure of training, and that is the
+# finding for section 2.4.
+#
+# Neither mode is "correct" in the abstract. Raster compares against the design as
+# the dataset stores it; svg compares two outlines under identical rendering.
+# Always state which one produced a number, and never mix them in one table.
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--exp_dir', help='e.g. experiments/dvf_base_exp_chn_main_model')
@@ -232,6 +257,11 @@ def main():
     parser.add_argument('--img_size', type=int, default=64)
     parser.add_argument('--csv_out', default=None,
                         help='write per-font rows here (default: <exp_dir>/results/eval_<ckpt>.csv)')
+    parser.add_argument('--gt_source', choices=['raster', 'svg'], default='raster',
+                        help="what to score against. 'raster' (default, every number in this "
+                             "project so far) uses the dataset's stored glyph image. 'svg' "
+                             "renders the ground-truth outline through the same rasterizer as "
+                             "the candidate. See the note above main().")
     parser.add_argument('--selftest', action='store_true',
                         help='check the SSIM implementation and exit; needs no results tree')
     args = parser.parse_args()
@@ -245,6 +275,10 @@ def main():
 
     font_dirs, layout, ckpt_label = resolve_font_dirs(args.exp_dir, args.name_ckpt)
     print(f"Layout: {layout}  |  checkpoint: {ckpt_label}  |  font dirs found: {len(font_dirs)}")
+    print(f"GT source: {args.gt_source}"
+          + ("  (dataset raster -- comparable to every number before 2026-08-05)"
+             if args.gt_source == 'raster'
+             else "  (GT outline through the same rasterizer -- NOT comparable to raster rows)"))
     if layout == 'flat':
         print("NOTE: flat layout. This tree predates the per-checkpoint change, so the "
               "checkpoint that produced it is not recorded. Re-run test_few_shot.py to "
@@ -265,17 +299,24 @@ def main():
             print(f"WARN {font_dir}: expected {2 * args.char_num} svgs, got {len(svgs)}, skipping")
             n_fonts_skipped += 1
             continue
+        # test_few_shot.py writes 2 * char_num SVGs into the merge HTML: the selected
+        # candidates first, then the ground-truth outlines. Only the first half was ever
+        # used before 2026-08-05. --gt_source svg scores against the second half.
         synth_svgs = svgs[:args.char_num]
+        gt_svgs = svgs[args.char_num:]
 
         font_l1, font_iou, font_ssim, font_ssim_bin = [], [], [], []
         font_expected = font_failed = 0
         for i in range(args.char_num):
             gt_path = os.path.join(font_dir, 'imgs', f"{i:02d}_gt.png")
-            if not os.path.exists(gt_path):
+            if args.gt_source == 'raster' and not os.path.exists(gt_path):
                 continue
             font_expected += 1
-            gt_mask = np.array(Image.open(gt_path))[:, :, 0]
             try:
+                if args.gt_source == 'svg':
+                    gt_mask = render_svg_mask(gt_svgs[i], args.img_size)
+                else:
+                    gt_mask = np.array(Image.open(gt_path))[:, :, 0]
                 synth_mask = render_svg_mask(synth_svgs[i], args.img_size)
             except Exception as e:
                 print(f"WARN render failed {font_dir} char {i}: {e}")

@@ -382,12 +382,18 @@ in the whole table by a wide margin.]`
 
 `[TO WRITE. The five findings, in this order, each already measured:`
 
-1. **The anchor bias**, and it is the one to lead with. Every delta in the project was quoted
-   against seed 1111, which turned out to be the worst of the three baseline draws and sits
-   0.0048 above their mean. 22 of 26 candidates beat that anchor, which reads as "almost any
-   arbitrary change helps" and is not credible; only 6 of 26 beat the mean. The replication
-   batch was selected on that ranking and its selection survived **1 time in 3**. Nothing
-   recorded was wrong, only the reading. The lesson generalizes past this project.
+1. **Why every delta in this report is quoted against a three-seed mean rather than against a
+   single baseline run**, and it is the one to lead with. Write it as method, not as
+   confession: we trained the baseline three times before running any candidate (day 1,
+   dated), so we can show directly what single-seed anchoring would have done to the same 26
+   results. Referenced to seed 1111, **22 of 26 candidates "beat" the baseline**, which reads
+   as *almost any arbitrary change helps* and is not credible. Referenced to the three-seed
+   mean, **6 of 26** do. The difference is that seed 1111 sits 0.0048 above the mean, well
+   inside the seed spread. Anyone reporting a single-seed baseline in this size class is
+   reporting the draw, not the change. We can also quantify the cost: ranking candidates on
+   the single-seed reference and replicating the top three at two further seeds, **1 of 3**
+   survived. That is a measured base rate for "the leading single-seed candidate is real",
+   and it is the number to hand a reader.
 2. **Architecture moves the metric about as much as the seed does**, 0.0101 against 0.0097
    across 26 changes and 3 re-seedings. Twenty-six draws from one distribution should span
    roughly 2.3 times the range of three; the observed ratio is 1.07.
@@ -405,8 +411,21 @@ at the released 128-bin grid is only +0.0021 over that floor. The E13 upper boun
 bins) is +0.0016, under the 0.0097 seed floor -- E13 could not have cleared it no matter how
 it landed, which is why it screened null. Then the floor-estimation point: a floor computed
 from three points is itself noisy, and s-IoU's moved from 0.0401 to 0.0315 on re-measurement,
-which is the anchor bias one level up. Close with the flow-matching head as future work,
-citing` archive/FLOW_MATCHING_PLAN.md`.]`
+which is the same point one level up: a reference computed from few samples is itself a
+sample. Close with the flow-matching head as future work, citing`
+archive/FLOW_MATCHING_PLAN.md`.
+
+`Sixth finding, pending the 2026-08-05 evening session (`docs/official-checkpoints-and-600.md`):
+**what "reconstruction error" is measured against turns out to be a choice, and it is worth
+more than any candidate in the sweep.** The pipeline floor of 0.1422 sits below our model's
+0.1621 but far above the paper's 0.080, because the candidate is rendered here through
+cairosvg while the ground truth comes from the dataset's own pre-rendered raster. Two
+rasterizers, one comparison. Scoring the ground-truth outline through the same rasterizer as
+the candidate removes that term. If the released checkpoints reproduce the paper under one
+convention and not the other, this is the strongest single result in the report and it
+belongs in section 2 as a property of the metric, with section 6 drawing the general lesson:
+a metric is a pipeline, not a formula, and two implementations of the same formula can differ
+by more than the effect being measured.]`
 
 ## 7. References
 
