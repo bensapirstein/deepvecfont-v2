@@ -58,6 +58,8 @@ def get_parser_main_model():
     parser.add_argument('--weight_decay', type=float, default=0.0, help='weight decay')
     parser.add_argument('--tboard', type=bool, default=True, help='whether use tensorboard to visulize loss')
     parser.add_argument('--wandb', type=str2bool, default=True, help='mirror scalar logging to Weights & Biases (metrics only, no artifacts); degrades to a no-op if wandb is not installed')
+    parser.add_argument('--wandb_project', type=str, default='deepvecfont-v2', help='wandb project name; keep language arms in separate projects if their runs should not share one dashboard')
+    parser.add_argument('--max_fonts', type=int, default=None, help='test_few_shot.py only: cap decode to the first N test fonts (test split is unshuffled, so N is a stable, reproducible subset); None = all')
 
     # loss weight
     parser.add_argument('--kl_beta', type=float, default=0.01, help='latent code kl loss beta')

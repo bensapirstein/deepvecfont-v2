@@ -206,33 +206,68 @@ systematic rather than a Chinese quirk, and that settles the interpretation on i
 
 ---
 
-## Reading it
+## Reading it — filled 2026-08-06
 
-Fill this in and the conclusion follows mechanically. Do not skip a cell.
+**Chinese numbers are the full 34-font test set** (as planned). **English numbers are
+NOT a full run** — see "Why English stopped short" below before quoting these.
 
 | | paper | official 600, raster | official 600, svg | our 150-epoch baseline |
 |---|---|---|---|---|
-| Chinese | 0.080 | | | 0.1621 (3-seed mean) |
-| English | 0.052 | | | not measured |
-| pipeline floor | — | 0.1422 (chn) | | |
+| Chinese | 0.080 | 0.1629 | 0.1174 | 0.1621 (3-seed mean) |
+| English | 0.052 | 0.0658 (34-font subset) | 0.0584 (34-font subset) | not measured |
+| pipeline floor | — | 0.1422 (chn, full 34) | 0.0266 (eng, 34-font subset) | — |
 
-- **Official ≈ paper under `raster`.** The metric was always right and we were
-  undertrained. Job B lands tonight and Stage 1 becomes a genuine reproduction. Rewrite
-  §2.4 around the measurement instead of the three-argument case it currently makes.
-- **Official ≈ paper under `svg` only.** The gap was a metric definition, not a model
-  or a budget. Report both columns, state which convention each uses, and lead with the
-  one that matches the paper. **Every Stage 2 delta stays valid** because it is a
-  like-for-like comparison under one fixed convention. Job B is then still worth having
-  but is no longer load-bearing.
-- **Official ≈ 0.16 under both.** Neither explanation survives, and the difference is
-  in the decode path rather than in the scoring: `n_samples`, `ref_char_ids`, the test
-  font list, or the best-of-N selection criterion. Next step is to vary `ref_nshot` and
-  the reference set on the *official* checkpoint, since that isolates protocol from
-  training completely. Do not start that before reporting the table above.
+None of the three preset buckets below fit cleanly — **the answer is language-dependent**,
+which the original three options didn't anticipate:
 
-Whatever lands, **the Stage 2 result is unaffected.** E9 is measured against our own
-baseline under one fixed convention, at three seeds, with a paired per-font test. A
-change in the absolute scale of the metric moves both arms of that comparison equally.
+- **Chinese fits none of the three cleanly.** Raster (0.163) and svg (0.117) are both
+  well above 0.080 — a ~2x and ~46% gap respectively. Same shape as before this session:
+  neither "we were undertrained" nor "it's a metric definition" survives on its own.
+- **English lands much closer to the paper under both conventions** — 0.0658/0.0584
+  against 0.052, a 15-27% gap, not 2x. And the raster/svg gap barely matters for
+  English (0.0074) versus Chinese (0.0455), which the pipeline floor explains
+  mechanically: English's floor is 0.0266, Chinese's is 0.1422. The cross-rasterizer
+  disagreement that dominates Chinese's raster/svg split is just much smaller in
+  English's dataset/rendering pipeline — independent of the model or checkpoint.
+- **So: same harness, same eval code, same "official checkpoint, no training here"
+  setup — English reproduces close to the paper, Chinese doesn't.** That's a real
+  finding for §2.4, not an artifact of one convention choice. Job B (600-epoch
+  Chinese retrain, three seeds, landed 2026-08-06) is the direct test of whether more
+  Chinese training closes the remaining gap; not yet scored against these numbers.
+
+### Why English stopped short (2026-08-06)
+
+English's test set is 1,386 fonts against Chinese's 34 — a 40x larger decode workload
+that nobody had sized before starting. At the measured ~43 s/font, a full 3-checkpoint
+run projected to ~40 GPU-hours and the in-progress single-checkpoint decode alone hit
+27 GB before being stopped partway (a full 1,386-font, 3-checkpoint sweep would have
+cost well over 100 GB against a 200 GB quota already sitting near the cap from
+project-wide screening history). Scope was cut to:
+
+- **Checkpoint 500**: scored on an 862-font partial decode (62% of the test set,
+  stopped and scored as-is) — the closest thing to a full number we have.
+- **Checkpoints 500/550/600**: scored on a matched, deterministic 34-font subset
+  (`--max_fonts`, added to `options.py`/`test_few_shot.py`/`eval_reconstruction_error.py`
+  this session; the test split is unshuffled, so the first N fonts are the same set
+  every time) — chosen to mirror the Chinese test set size exactly, for comparability.
+- All three checkpoints landed within 0.0013 (raster) / 0.0015 (svg) of each other on
+  the subset — statistically flat, same pattern as Chinese's 500/550/600. The subset
+  reads optimistic relative to the larger sample by +0.0074 (raster) / +0.0106 (svg)
+  (34-font vs 862-font, checkpoint 500) — real but modest, ~11-19% relative. That gap is
+  the evidence for whether a small-subset screening protocol is defensible elsewhere in
+  this project on time grounds; it is documented here rather than closed by a full run.
+- The English pipeline floor (`oracle_eng_subset34.csv`) is also on the 34-font subset,
+  not the full set, for the same reason.
+
+**Bottom line: treat the English row as a scoped, reasoned estimate, not the load-bearing
+number Job A originally set out to produce.** If cluster time and disk quota allow later,
+completing checkpoint 500's decode (resume from font 862; the skip-if-done logic in
+`test_few_shot.py` picks up where it left off) is the cheapest way to firm this up.
+
+Whatever the eventual full-scope number says, **the Stage 2 result is unaffected.** E9 is
+measured against our own baseline under one fixed convention, at three seeds, with a
+paired per-font test. A change in the absolute scale of the metric moves both arms of
+that comparison equally.
 
 ---
 

@@ -209,7 +209,7 @@ def train_main_model(opts):
     if opts.wandb and wandb is None:
         print("WARNING: --wandb is set but wandb is not installed; continuing without it. `pip install wandb`")
     if use_wandb:
-        wandb.init(project="deepvecfont-v2", name=opts.name_exp, config=vars(opts), tags=[opts.language])
+        wandb.init(project=opts.wandb_project, name=opts.name_exp, config=vars(opts), tags=[opts.language])
 
     loss_img_items = ['l1', 'vggpt']
     loss_svg_items = ['total', 'cmd', 'args', 'aux', 'smt']

@@ -48,6 +48,7 @@ BATCH = {
     "e9_sigma050_2222_chn": "tier3b", "e9_sigma050_3333_chn": "tier3b",
     "e1_norm_2222_chn": "tier3b", "e1_norm_3333_chn": "tier3b",
     "e13_bins256_2222_chn": "tier3b", "e13_bins256_3333_chn": "tier3b",
+    "official_chn": "official-checkpoint", "official_eng": "official-checkpoint",
 }
 
 # Eval budget (--n_samples) each experiment was screened/confirmed at.
@@ -64,6 +65,13 @@ BATCH = {
 # and this map is only the fallback for files with no suffix.
 N_SAMPLES = {
     "dvf_base_exp_chn": 50,  # Stage 1 confirmation budget, matches the paper
+    # official_{chn,eng}: every eval_*.csv here (n50, n50_gtsvg, n50_partial862,
+    # n50_subset34, ...) was decoded at --n_samples 50; the extra suffixes after
+    # _n50 don't match CKPT_NSAMPLES_RE (deliberately -- stripping them would
+    # collide the raster and svg rows under one checkpoint label), so this
+    # fallback is what actually supplies the correct budget for these two.
+    "official_chn": 50,
+    "official_eng": 50,
 }
 
 # eval_<ckpt>_n<N>.csv -> (ckpt, N). Anything without the suffix falls back to
@@ -139,7 +147,11 @@ def main():
 
             opts = read_opts(exp_dir)
             seed = opts.get("seed", "1111" if name_exp == "dvf_base_exp_chn" else "")
-            language = opts.get("language", "chn")
+            # opts.txt is written by train.py; experiments that only ever ran
+            # test_few_shot.py (e.g. official_{chn,eng}, symlinked checkpoints
+            # with no training here) have none, so the old "chn" default silently
+            # mislabeled every official_eng row. Fall back to the name_exp suffix.
+            language = opts.get("language") or ("eng" if name_exp.endswith("_eng") else "chn")
 
             batch = BATCH.get(name_exp)
             if batch is None:

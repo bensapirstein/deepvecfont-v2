@@ -89,6 +89,9 @@ def check_options():
 
     check("--wandb exists", 'wandb' in actions)
     check("--wandb default is True", defaults.get('wandb') is True, f"got {defaults.get('wandb')!r}")
+    check("--wandb_project exists", 'wandb_project' in actions)
+    check("--wandb_project default is 'deepvecfont-v2'",
+          defaults.get('wandb_project') == 'deepvecfont-v2', f"got {defaults.get('wandb_project')!r}")
 
     # The stage-2 flags must be inert: their defaults have to reproduce current behaviour.
     # This is what keeps the 3-seed noise floor comparable to every run launched after
@@ -194,8 +197,10 @@ def check_train_source():
         kw = {k.arg for k in init.keywords}
         for arg in ('project', 'name', 'config', 'tags'):
             check(f"wandb.init passes {arg}=", arg in kw)
-        check("wandb.init project is 'deepvecfont-v2'",
-              any(k.arg == 'project' and getattr(k.value, 'value', None) == 'deepvecfont-v2'
+        check("wandb.init project is opts.wandb_project (not a hardcoded literal, "
+              "so language arms can be split into separate projects)",
+              any(k.arg == 'project' and isinstance(k.value, ast.Attribute)
+                  and k.value.attr == 'wandb_project'
                   for k in init.keywords))
         check("wandb.init config is vars(opts)", 'vars' in ast.dump(init))
 

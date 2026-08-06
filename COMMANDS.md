@@ -103,10 +103,14 @@ Last used: `--name_ckpt 100_4040_valloss4.0329.ckpt`
 ### English (eng)
 
 ```
-CUDA_VISIBLE_DEVICES=1 nohup python train.py --mode train --name_exp dvf_base_exp_eng --model_name main_model --batch_size 32 --max_seq_len 51 --language eng --ref_nshot 4 --freq_ckpt 20 --max_ckpt_keep 3 --n_epochs 801
+CUDA_VISIBLE_DEVICES=1 nohup python train.py --mode train --name_exp dvf_base_exp_eng --model_name main_model --batch_size 32 --max_seq_len 51 --language eng --ref_nshot 4 --freq_ckpt 20 --max_ckpt_keep 3 --n_epochs 801 --wandb_project deepvecfont-v2-eng
 ```
 
 Latest checkpoint available: `600_192921_valloss2.0824.ckpt`
+
+**Every English `train.py` run takes `--wandb_project deepvecfont-v2-eng`** (2026-08-06),
+so English stays in its own wandb project instead of mixed into the Chinese dashboard.
+`test_few_shot.py` has no wandb calls, so this only applies to training commands.
 
 ## Testing (few-shot)
 

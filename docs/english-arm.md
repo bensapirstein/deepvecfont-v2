@@ -33,8 +33,12 @@ deltas. Whichever is chosen, every English number in the report has to use it.
 cd ~/deepvecfont-v2 && conda activate dvf_v2
 CUDA_VISIBLE_DEVICES=1 python train.py --mode train --name_exp eng_timing \
   --model_name main_model --language eng --max_seq_len 51 --ref_nshot 4 \
-  --batch_size 32 --seed 1111 --n_epochs 6 --freq_ckpt 5 --max_ckpt_keep 1
+  --batch_size 32 --seed 1111 --n_epochs 6 --freq_ckpt 5 --max_ckpt_keep 1 \
+  --wandb_project deepvecfont-v2-eng
 ```
+
+Every English `train.py` run below should carry `--wandb_project deepvecfont-v2-eng` —
+English stays in its own wandb project rather than mixed into the Chinese runs' dashboard.
 
 Read steady-state s/epoch off epochs 2→5, the same way §3.3 did for Chinese
 (excluding startup). Then size against this, which is §3.3's table re-derived for a
@@ -57,9 +61,9 @@ property of this dataset, this budget and this metric.
 
 ```bash
 # EXPERIMENTS in run_experiments.sh, with COMMON_ARGS switched to the English block
-"eng_seedfloor_1111 --seed 1111"
-"eng_seedfloor_2222 --seed 2222"
-"eng_seedfloor_3333 --seed 3333"
+"eng_seedfloor_1111 --seed 1111 --wandb_project deepvecfont-v2-eng"
+"eng_seedfloor_2222 --seed 2222 --wandb_project deepvecfont-v2-eng"
+"eng_seedfloor_3333 --seed 3333 --wandb_project deepvecfont-v2-eng"
 ```
 
 **Freeze the cut-off from these three curves before looking at any candidate.** The

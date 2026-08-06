@@ -264,6 +264,10 @@ def main():
                              "the candidate. See the note above main().")
     parser.add_argument('--selftest', action='store_true',
                         help='check the SSIM implementation and exit; needs no results tree')
+    parser.add_argument('--max_fonts', type=int, default=None,
+                        help='score only the first N font dirs (sorted, so a stable subset), '
+                             'even if more are present on disk -- for comparing a matched '
+                             'subset across checkpoints that were decoded to different depths')
     args = parser.parse_args()
 
     if args.selftest:
@@ -274,7 +278,10 @@ def main():
         raise SystemExit('ERROR: cairosvg is not installed; it is required to render candidates')
 
     font_dirs, layout, ckpt_label = resolve_font_dirs(args.exp_dir, args.name_ckpt)
-    print(f"Layout: {layout}  |  checkpoint: {ckpt_label}  |  font dirs found: {len(font_dirs)}")
+    if args.max_fonts is not None:
+        font_dirs = font_dirs[:args.max_fonts]
+    print(f"Layout: {layout}  |  checkpoint: {ckpt_label}  |  font dirs found: {len(font_dirs)}"
+          + (f"  |  scoring first {args.max_fonts}" if args.max_fonts is not None else ""))
     print(f"GT source: {args.gt_source}"
           + ("  (dataset raster -- comparable to every number before 2026-08-05)"
              if args.gt_source == 'raster'

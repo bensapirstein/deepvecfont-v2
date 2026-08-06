@@ -27,6 +27,10 @@ def test_main_model(opts):
         
         for test_idx, test_data in enumerate(test_loader):
 
+            if opts.max_fonts is not None and test_idx >= opts.max_fonts:
+                print(f"--max_fonts {opts.max_fonts} reached, stopping.")
+                break
+
             dir_save = os.path.join(dir_res, "%04d"%test_idx)
             svg_merge_dir = os.path.join(dir_save, "svgs_merge")
             merge_outfile = os.path.join(svg_merge_dir, f"{opts.name_ckpt}_syn_merge_{test_idx}.html")
