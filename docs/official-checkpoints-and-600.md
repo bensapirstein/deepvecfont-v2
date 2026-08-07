@@ -214,7 +214,7 @@ NOT a full run** — see "Why English stopped short" below before quoting these.
 | | paper | official 600, raster | official 600, svg | our 150-epoch baseline |
 |---|---|---|---|---|
 | Chinese | 0.080 | 0.1629 | 0.1174 | 0.1621 (3-seed mean) |
-| English | 0.052 | 0.0658 (34-font subset) | 0.0584 (34-font subset) | not measured |
+| English | 0.052 | 0.0658 (34-font subset) | 0.0584 (34-font subset) | 0.0597 (3-seed mean, 34-font subset, raster; `docs/english-arm.md`) |
 | pipeline floor | — | 0.1422 (chn, full 34) | 0.0266 (eng, 34-font subset) | — |
 
 None of the three preset buckets below fit cleanly — **the answer is language-dependent**,
@@ -234,6 +234,13 @@ which the original three options didn't anticipate:
   finding for §2.4, not an artifact of one convention choice. Job B (600-epoch
   Chinese retrain, three seeds, landed 2026-08-06) is the direct test of whether more
   Chinese training closes the remaining gap; not yet scored against these numbers.
+- **Our own English baseline (0.0597, three seeds, `docs/english-arm.md`) scores
+  *better* than the official released checkpoint (0.0651 mean) on the same 34-font
+  subset**, and is closer to the paper (0.052) than the official checkpoint is. Unlike
+  Chinese, where the official checkpoint essentially equals our from-scratch baseline,
+  English training here is not undertrained relative to the release — the remaining
+  gap to the paper looks like a protocol/metric question, not a training one, on
+  English specifically.
 
 ### Why English stopped short (2026-08-06)
 

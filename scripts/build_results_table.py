@@ -49,6 +49,8 @@ BATCH = {
     "e1_norm_2222_chn": "tier3b", "e1_norm_3333_chn": "tier3b",
     "e13_bins256_2222_chn": "tier3b", "e13_bins256_3333_chn": "tier3b",
     "official_chn": "official-checkpoint", "official_eng": "official-checkpoint",
+    "eng_seedfloor_1111": "baseline", "eng_seedfloor_2222": "baseline",
+    "eng_seedfloor_3333": "baseline",
 }
 
 # Eval budget (--n_samples) each experiment was screened/confirmed at.
@@ -72,6 +74,9 @@ N_SAMPLES = {
     # fallback is what actually supplies the correct budget for these two.
     "official_chn": 50,
     "official_eng": 50,
+    # eng_seedfloor_*: confirmation-style n_samples 50 (docs/english-arm.md), same
+    # _n50_subset34 suffix issue as official_eng above.
+    "eng_seedfloor_1111": 50, "eng_seedfloor_2222": 50, "eng_seedfloor_3333": 50,
 }
 
 # eval_<ckpt>_n<N>.csv -> (ckpt, N). Anything without the suffix falls back to

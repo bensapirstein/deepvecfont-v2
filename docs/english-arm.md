@@ -86,6 +86,50 @@ they were trained to. That is the honest version and it costs three runs; scorin
 baselines at a checkpoint the candidates never saw is the shortcut, and it puts a
 budget difference inside every delta.
 
+### Cut-off computed, 2026-08-07
+
+All three seeds were run to `--n_epochs 801` (2026-08-06 session, before this rule was
+applied retroactively — deliberately, per the plan to "start at 801, trim later"), not
+frozen up front the way the rule above prescribes. Applying it now to the completed
+curves:
+
+| seed | `E_conv` | best@`E_conv` | best@`E_conv+100` | rel. improvement |
+|---|---|---|---|---|
+| 1111 | 400 | 3.0126 | 3.0126 | 0.0% |
+| 2222 | 580 | 2.9002 | 2.9002 | 0.0% |
+| 3333 | 420 | 3.0290 | 3.0161 | 0.42% |
+
+Latest `E_conv` = 580 (seed 2222), already a multiple of `freq_ckpt` (20), **+ 50 =
+budget 630.** Confirms Step 1's timing finding independently: at ~100 s/epoch, even
+630 epochs is ~17.5 GPU-hours per run — past this doc's own ">6h: drop English"
+line, well before three seeds plus any candidate.
+
+**Checkpoint retention collided with this.** `max_ckpt_keep=3` keeps the 3
+lowest-`val_metric` checkpoints ever logged plus the latest, not a fixed epoch
+stride, so which epochs survive to score depends on each seed's own noise — not on
+what the frozen budget turns out to be. `640` (the nearest `freq_ckpt` multiple to
+630) survived for seeds 1111 and 3333 by coincidence (it happened to rank in their
+top 3); it did **not** survive for 2222, whose top 3 were 580/740/500. Scored
+2222 at **580** instead — its own `E_conv` point, the closest surviving checkpoint to
+630 available (580 vs. the next option, 740).
+
+This is exactly the "shortcut" the rule above names, not the honest re-run — but it's
+a defensible one here specifically: these baselines use the default `ExponentialLR`
+schedule (`ckpt = gamma ** epoch`, `gamma` fixed, independent of `--n_epochs`), not
+E14's `warmup_cosine`, which is the only schedule in this codebase that derives its
+shape from the total budget (`train.py` line ~174). So the LR trajectory up to epoch
+640 is identical whether the run was ever going to stop at 630 or 800 — a checkpoint
+pulled from the middle of the 800-epoch run is not distinguishable from one a
+630-epoch run would have produced at the same epoch. **That stops being true the
+moment an E14 candidate is in the comparison** — its schedule is shaped by the
+declared `--n_epochs`, so E14 specifically needs a real run at the frozen budget, not
+a checkpoint pulled from a longer one.
+
+Scored on the 34-font subset (`--max_fonts 34`, same methodology and same subset as
+the official-checkpoint eval), `n_samples 50`, raster convention — table and result in
+`RESULTS.csv` / `PROJECT_PLAN.md` §5. This is the "our 150-epoch baseline" row's
+English counterpart, previously "not measured."
+
 ## Step 3 — candidates
 
 Which candidates depends on Tier 3 Batch B, which is what the whole Chinese arm has
