@@ -146,6 +146,34 @@ English is a *generalization* test, not a second sweep. The claim it supports is
 not eighteen. Running the full matrix again would spend the budget and add nothing
 the Chinese arm has not already said.
 
+### Resolved 2026-08-07: one candidate, three seeds, and the cut-off overruled
+
+**The Step 1 table's last row fired.** `E_conv` = 580, frozen budget 630, ~100 s/epoch,
+so a single English run is **~17.5 GPU-hours**. That is the `> 6 h` row, whose
+instruction is "Drop English. Say so in §8 item 4 and spend the time on the report."
+Step 1's timing and Step 2's convergence rule reached that conclusion independently.
+
+**Overruled the same day, deliberately, by Ben.** Three GPUs were free and the schedule
+had six days of slack that did not exist when the rule was written on 2026-08-04, so
+the tradeoff the rule priced (GPU time against report time) no longer holds at that
+price. Three runs across three GPUs is one overnight.
+
+This is recorded as an overrule rather than absorbed, and `REPORT.md`'s methods section
+says so. A pre-committed rule quietly dropped the one time it produces an inconvenient
+answer is worth less than no rule, and Stage 2's whole argument rests on rules fixed
+before the numbers arrived.
+
+**What runs: E9 `enc_noise_std_train=0.5` at three seeds, nothing else.** Not the
+ordering above, which anticipated two or three different candidates. The reason is
+`PROJECT_PLAN.md` §0's two 2026-08-05 measurements plus Batch B's 1-in-3 replication
+rate: single-seed points at this resolution have now been shown twice over not to
+resolve, and the English L1 floor (0.0038) sits just under E9's own Chinese
+confirmation delta (0.0040). Three seeds of one candidate can clear that bar; one seed
+each of three candidates cannot.
+
+Full design, per-seed `--n_epochs`, pre-committed reading rule and commands:
+`docs/english-candidate.md`.
+
 ## On E14 and English
 
 Tempting, and worth resisting for now. E14's Chinese rendered delta was −0.0010 —

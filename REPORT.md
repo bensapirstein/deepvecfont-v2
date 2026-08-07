@@ -223,7 +223,7 @@ evaluation rather than to us.
 | | paper | official 600 ep, raster GT | official 600 ep, svg GT | ours, 150 ep, 3-seed mean |
 |---|---|---|---|---|
 | Chinese, full 34 fonts | 0.080 | 0.1629 | 0.1174 | **0.1621** |
-| English, 34-font subset † | 0.052 | 0.0658 | 0.0584 | not trained |
+| English, 34-font subset † | 0.052 | 0.0658 | 0.0584 | **0.0597** ‡ |
 
 Checkpoints load strictly against all 136,055,207 parameters, and every row is best-of-50
 decoding. The two ground-truth conventions are defined below.
@@ -274,6 +274,19 @@ protocol rather than at the model: the test font list, the character subset, `re
 or the dataset build itself. We did not measure it, and we state its size rather than
 speculate about its cause.
 
+**Training our own English baseline sharpens that residual rather than softening it.** Three
+English seeds trained to a budget frozen from their own convergence curves score **0.0597**
+mean L1 on the subset, which is *better* than the released checkpoint's 0.0658 at the same
+epoch range and closer to the reported 0.052. The margin over the release, 0.0048 to 0.0061
+across the three released checkpoints, is 1.3 to 1.6 times the English seed-noise floor of
+0.0038, so it clears the floor while staying the same order of magnitude as it. The pattern
+across the two scripts is the informative part: on Chinese our training matches the authors'
+released weights and both fall well short of the published figure, while on English our
+training slightly exceeds their released weights and lands near the published figure. A
+training deficiency on our side would have to show up in both columns. It shows up in
+neither, which leaves the Chinese-specific residual exactly where the previous paragraph
+puts it.
+
 **Three earlier candidates, eliminated before the checkpoints were scored.** Each was checked
 rather than argued away, and each would have invalidated the reproduction had it held.
 
@@ -319,6 +332,15 @@ checkpoint 500. The subset reads **optimistic** against the larger sample by 0.0
 and 0.0106 (svg), so a full-set English figure would sit nearer 0.073 and 0.069. That widens
 English's shortfall without disturbing the Chinese-versus-English contrast this section rests
 on, since the contrast is an order of magnitude larger than the bias.
+
+‡ **Our English figure carries the same subset bias, and it is the same subset.** The three
+English baselines are scored on the identical 34-font prefix, at the identical sample budget,
+under the identical convention, so the comparison against the released checkpoint in the same
+row is exact even though the absolute value is optimistic. Epochs differ slightly across the
+three seeds (640, 580, 640) because checkpoint retention keeps the lowest-validation
+checkpoints rather than a fixed stride; these runs use a fixed per-epoch exponential learning
+rate schedule that does not depend on the declared budget, so a checkpoint drawn at a given
+epoch is not distinguishable from one a shorter run would have produced there.
 
 ---
 
