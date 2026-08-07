@@ -12,6 +12,14 @@ Ben Sapirstein · Generative Models for Text and Images, Reichman University · 
 > Tier 1–3, seed-floor, or confirmation number). Every number here is traceable to
 > `RESULTS.csv` or to a dated **Measured** paragraph in `PROJECT_PLAN.md`; nothing is typed
 > twice by hand.
+>
+> **Updated 2026-08-06.** Section 2.4 was rewritten outright. The previous version attributed
+> the gap to 0.080 primarily to training budget; scoring the authors' released checkpoints
+> through this harness falsified that, and the section now argues from the measurement. The
+> abstract, §2.2's metric properties, §2.3's table and §6's outline all moved with it. The
+> superseded text is in git history at `661b556`. Two findings were added to §6 and they are
+> the strongest material in the report, so the discussion write-up should start there rather
+> than at finding 1.
 
 ---
 
@@ -20,9 +28,13 @@ Ben Sapirstein · Generative Models for Text and Images, Reichman University · 
 We reproduce DeepVecFont-v2 (Wang et al., CVPR 2023) on Chinese vector font synthesis and
 then run a controlled sweep of twenty-one single-factor architectural changes against it.
 The reproduction reaches a rendered reconstruction error of 0.1621 (three-seed mean, 34 test
-fonts, best-of-50 decoding) against the paper's reported 0.080. We attribute the gap
-primarily to training budget, and we rule out three of the four candidate explanations by
-measurement rather than by argument.
+fonts, best-of-50 decoding) against the paper's reported 0.080. To locate that gap we scored
+the authors' own released checkpoints through the same harness: they return 0.1629, which is
+0.0008 from our figure and well inside the seed-noise floor. The reproduction is therefore
+faithful to the released model, training budget is eliminated as an explanation, and the
+distance to the published number is a property of the evaluation. We measure one term of it
+directly, a cross-rasterizer disagreement worth 0.0455 on Chinese against 0.0074 on English,
+and report the remaining Chinese-specific 0.037 as open.
 
 The sweep's headline is a measurement of its own resolution. Before running any candidate we
 measured the spread of the reported metric across three re-seedings of the released model,
@@ -145,7 +157,7 @@ This deserves its own subsection because three later results turn on it.
 
 The metric is a rasterized proxy for vector fidelity. It says nothing about command count,
 self-intersection, or control-point placement, only whether the inked region lands in the
-right place. Two further properties matter:
+right place. Three further properties matter:
 
 1. **It is scored after best-of-N selection**, so it measures the best of N decoded
    candidates rather than the average sample. N is therefore a parameter of the metric, not
@@ -158,8 +170,20 @@ right place. Two further properties matter:
    uniform on ±0.3125 px. A coordinate-level improvement can therefore be real and still
    move this metric very little, which caps what any change to the argument head could ever
    have shown.
+3. **It is undefined until the ground-truth side is specified**, and on Chinese that choice
+   is worth 0.0455, more than seven times the paper's own margin over its predecessor. The
+   candidate glyph is always rendered by our rasterizer; the ground truth may be the
+   dataset's stored bitmap, produced by a different rasterizer at dataset-build time, or the
+   ground-truth outline pushed through the rasterizer the candidate uses. Section 2.4
+   measures the gap between the two and shows it tracks the pipeline floor rather than the
+   model. Every Stage 2 comparison in this report holds one convention fixed on both arms,
+   so the term cancels in the paired differences and no result in §4 or §5 depends on it; it
+   matters only where an absolute value meets a published one.
 
 ### 2.3 Reconstruction results
+
+Every row below is the raster ground-truth convention unless marked otherwise, which per
+§2.2 is a required label rather than a detail.
 
 | Row | n_samples | Error (L1) ↓ | SSIM ↑ | s-IoU ↑ | Render % |
 |---|---|---|---|---|---|
@@ -172,6 +196,13 @@ right place. Two further properties matter:
 | **This reproduction, seed 2222** | 50 | 0.1569 | 0.4487 | 0.2716 | 34/34 |
 | **This reproduction, seed 3333** | 50 | 0.1632 | 0.4413 | 0.2781 | 34/34 |
 | **Three-seed mean** | 50 | **0.1621** | **0.4425** | **0.2681** | 34/34 |
+| Official checkpoint, 600 ep | 50 | 0.1629 | 0.4373 | 0.3225 | 34/34 |
+| Official checkpoint, 600 ep, *svg GT* | 50 | 0.1174 | 0.5450 | 0.4627 | 34/34 |
+
+The two official rows are the authors' released weights scored through this harness, not runs
+of ours. Section 2.4 reads them; the short version is that our three-seed mean sits 0.0008
+from the released model under the identical convention, and that switching the ground-truth
+convention moves the same fixed checkpoint by 0.0455.
 
 Renderability is reported because it is silently rewarded otherwise. `test_few_shot.py`
 wraps its rasterizer in a bare `except: continue`, and a model that fails on hard glyphs gets
@@ -182,74 +213,112 @@ failing to render entirely, which is why the quantity is now reported per run.
 
 ### 2.4 The gap to 0.080
 
-The reproduction lands at roughly double the paper's Chinese number. Four explanations were
-identified in advance; three are now eliminated and the fourth accounts for the gap on its
-own.
+The reproduction lands at roughly double the paper's Chinese number. The question is whether
+that is a failure of our training run or a property of the evaluation, and it is answerable
+without arguing about it: the authors released their trained checkpoints, so we scored those
+through our own harness. Nothing was trained on our side for this measurement, which is what
+makes it decisive. Any shortfall the released weights show here is attributable to the
+evaluation rather than to us.
 
-**Eliminated by measurement: an evaluation-harness fault.** The evaluation script's results
-glob sat one directory level shallower than the layout `test_few_shot.py` writes, so against
-the current tree every font was skipped silently. This was found and fixed, and the fixed
-script reports the layout it detected on its first line. It reports `per-checkpoint`, so the
-figure was scored against the tree its named checkpoint actually produced.
+| | paper | official 600 ep, raster GT | official 600 ep, svg GT | ours, 150 ep, 3-seed mean |
+|---|---|---|---|---|
+| Chinese, full 34 fonts | 0.080 | 0.1629 | 0.1174 | **0.1621** |
+| English, 34-font subset † | 0.052 | 0.0658 | 0.0584 | not trained |
 
-**Eliminated by reading the preprocessing driver: coarser quantization than assumed.** The
-codebase carries two `numericalize` definitions on different grids, 128 bins in the model
-path and 64 in `data_utils/relax_rep.py`, and the preprocessing copy round-trips the sequence
-array in place through a numpy view. Had that mutation reached the persisted training data,
-the head would predict over 128 bins that the data only populates at 64, and half the
-vocabulary would be structurally unreachable. It does not. `relax_rep.process` writes
-`sequence_relaxed.npy` *before* calling the mutating function and never saves the array
-again, and the dataloader reads that file. The training sequences are at full float
-resolution.
+Checkpoints load strictly against all 136,055,207 parameters, and every row is best-of-50
+decoding. The two ground-truth conventions are defined below.
 
-**Eliminated by arithmetic: a different test protocol.** This one looked live. The paper does
-not fully specify `ref_char_ids`, `n_samples` or the font list, and all three move the number.
-But §2.2 measured the largest of them: the whole best-of-N budget range is worth about 0.006,
-and the reported figure is already taken at N = 50, the top of it. Granting the paper an
-unstated advantage of similar size on the other two puts the entire protocol surface at
-roughly 0.01 against a gap of 0.087. **Protocol accounts for a tenth of the gap at most.**
+**The reproduction is faithful.** Our 150-epoch Chinese baseline scores 0.1621 against the
+released 600-epoch checkpoint's 0.1629 under the identical convention, font set and sample
+budget: a difference of 0.0008, roughly a twelfth of the 0.0093 seed-noise floor §3.2
+measures, which is to say indistinguishable from re-seeding the same model. Whatever
+separates this work from the published number, it is not the training run reported here.
 
-**A fifth candidate, checked and folded in rather than left open: representation and
-rasterizer loss.** Section 2.3's oracle renders the *exact* ground-truth relaxed sequence
-through the same pipeline the model is scored with, so its L1 is the best any model working
-in this representation could ever achieve. It comes out to 0.1422 at n = ∞ (no quantization
-at all) and 0.1443 at the released 128-bin grid — both *below* the three-seed reproduction
-mean of 0.1621. A floor above the model's own score would have meant part of the 0.087 gap
-was structurally unreachable; a floor this far below it means the opposite; the model has not
-used up the headroom the representation already allows, which is what an undertrained model
-looks like. Quantization proper costs only 0.0021 of that (0.1443 − 0.1422). Between them,
-representation and quantization account for a small, now-measured sliver of the gap, and
-training budget carries the rest.
+**Training budget does not explain the gap.** The released checkpoint carries four times our
+epoch budget and scores no better through this evaluation. The 500, 550 and 600 epoch
+checkpoints also agree within 0.0013 of each other in both languages, so the authors' own
+optimization had saturated well before the budget ended. This eliminates the explanation
+that a longer Chinese run would close the distance to 0.080, and it eliminates it on the
+strongest available evidence, which is the paper's own weights rather than an extrapolation
+from ours.
 
-**Not eliminated, and sufficient alone: training budget.** The baseline ran 125 epochs and
-the seed-floor runs 150. Three observations point the same way and none required an
-experiment.
+What remains divides into one term we can measure and one we can only bound.
 
-First, the validation loss was still falling when every run ended. Epoch 135 scores 0.1641
-against epoch 125's 0.1668, and epoch 150 is the best-validation checkpoint for five of the
-six confirmation-budget runs. A model still improving when its budget expires is
-undertrained by definition.
+**The ground-truth convention, worth roughly half the Chinese gap.** "Error" names a
+comparison, and it is undefined until both operands are fixed. The synthesized glyph is
+always rendered by our rasterizer. The ground truth can be the dataset's stored bitmap,
+produced by a *different* rasterizer when the dataset was built, or the ground-truth outline
+pushed through the same rasterizer as the candidate. We implemented both (`--gt_source
+raster` and `--gt_source svg`) and the difference between them is pure cross-rasterizer
+disagreement, carrying no information about any model. It is not a rounding term and it is
+not symmetric across languages: **0.0455 on Chinese** against **0.0074 on English**.
 
-Second, the English arm is an internal control. `dvf_base_exp_eng` reached epoch 600 on
-51-step sequences, where the Chinese runs stopped at 150 on 71-step sequences. The one
-configuration here that resembles a converged budget ran four times as long on an easier
-task.
+The pipeline floor confirms the reading independently. Scoring ground truth against ground
+truth through our rasterizer gives 0.1422 on Chinese and 0.0253 on English. **The paper's
+reported 0.080 sits 0.062 below the Chinese floor**, so under the raster convention it is
+unreachable by any model whatsoever, the authors' included. English's floor at 0.0253 sits
+comfortably below its reported 0.052. The convention is load-bearing for Chinese and close to
+irrelevant for English, and the difference tracks the floors rather than the models.
 
-Third, and most persuasively, this comes free from Stage 2. **Twenty-six deliberate
-single-factor changes to the architecture, optimizer, loss weighting, quantization grid,
-latent width and regularization together span 0.0101 in L1** (§3.1). The gap to the paper is
-0.087, roughly nine times that entire span. No architectural difference between this
-reproduction and the paper's could plausibly be worth nine times the range of twenty-six
-deliberate ones. Training budget can be, because it is the one axis the sweep never varied.
+The scale matters here. The paper's entire margin over its own predecessor on Chinese is
+0.006 absolute (§1.3's table). The convention choice moves the number by 0.0455, more than
+seven times that margin, so a Chinese Error quoted without its ground-truth convention cannot
+be compared against published values at all.
 
-That the reproduction lands on DeepSVG's published Chinese result of 0.167 is a coincidence
-worth stating and not worth leaning on. DeepSVG is a different model and the agreement
-carries no information about this one.
+**A Chinese-specific residual of about 0.037, which we report open.** Under the svg
+convention the rasterizer term is gone by construction, and the two languages still diverge.
+English reaches 0.0584 against a reported 0.052, a 12% shortfall on a scoped subset. Chinese
+reaches 0.1174 against a reported 0.080, still 47% high. Same harness, same evaluation code,
+same released weights, opposite outcomes. What is left points at the Chinese data or test
+protocol rather than at the model: the test font list, the character subset, `ref_char_ids`,
+or the dataset build itself. We did not measure it, and we state its size rather than
+speculate about its cause.
 
-**What this does not claim.** No run was made to test whether training longer reaches 0.080.
-Confirming it costs a 600-epoch Chinese run, roughly four hours, and it would answer a
-reproduction question with budget the sweep had better uses for. It is reported as the
-leading explanation with its evidence and its status stated.
+**Three earlier candidates, eliminated before the checkpoints were scored.** Each was checked
+rather than argued away, and each would have invalidated the reproduction had it held.
+
+*An evaluation-harness fault.* The evaluation script's results glob sat one directory level
+above the layout `test_few_shot.py` writes, so against the current tree every font was
+skipped silently. This was found and fixed, and the fixed script prints the layout it
+detected on its first line. It reports `per-checkpoint`, so every figure was scored against
+the tree its named checkpoint actually produced.
+
+*A coarser quantization grid than assumed.* The codebase carries two `numericalize`
+definitions on different grids, 128 bins in the model path and 64 in `data_utils/relax_rep.py`,
+and the preprocessing copy round-trips the sequence array in place through a numpy view. Had
+that mutation reached the persisted training data, the head would predict over 128 bins that
+the data populates only at 64 and half the vocabulary would be structurally unreachable. It
+does not: `relax_rep.process` writes `sequence_relaxed.npy` *before* calling the mutating
+function and never saves the array again, and the dataloader reads that file. Quantization at
+the released grid costs 0.0021 on Chinese and 0.0013 on English, measured directly against
+the n = ∞ floor.
+
+*A different test protocol.* The paper does not fully specify `ref_char_ids`, `n_samples` or
+the font list, and all three move the number. Section 2.2 measured the largest of them: the
+whole best-of-N budget range is worth about 0.006, and our figures are taken at N = 50, the
+top of it. Granting the paper an unstated advantage of similar size on each of the other two
+puts the entire protocol surface near 0.01. It is a real term and it is a small one.
+
+**What we do not claim.** We have not identified the definition under which 0.080 is
+obtained, and we do not assert that the paper's number is wrong. We assert something
+narrower and better supported: under a single evaluation applied identically to their weights
+and ours, the two models are indistinguishable, and the distance from both to the published
+figure is a property of that evaluation. The Chinese residual under the matched-rasterizer
+convention remains unexplained and is reported as such.
+
+We also drop an observation earlier drafts leaned on, that the reproduction lands near
+DeepSVG's published Chinese 0.167. With the raster-convention floor measured at 0.1422, any
+model scored this way inherits the same offset, so agreement with another paper's number
+under an unknown pipeline is arithmetic rather than corroboration.
+
+† **The English rows are scoped, not full-set.** English's test split is 1,386 fonts against
+Chinese's 34, and a full three-checkpoint sweep projected to roughly 40 GPU-hours and over
+100 GB against a 200 GB quota near its cap. We cut to a deterministic 34-font prefix of the
+unshuffled split for the 500/550/600 comparison, plus an 862-font partial decode of
+checkpoint 500. The subset reads **optimistic** against the larger sample by 0.0074 (raster)
+and 0.0106 (svg), so a full-set English figure would sit nearer 0.073 and 0.069. That widens
+English's shortfall without disturbing the Chinese-versus-English contrast this section rests
+on, since the contrast is an order of magnitude larger than the bias.
 
 ---
 
@@ -343,7 +412,9 @@ existed, so they could not be chosen to suit an outcome.
   at every seed.
 - **The English epoch budget** is frozen from the baseline curves before any candidate is
   looked at, in `docs/english-arm.md`, because the cosine schedule derives its shape from the
-  epoch count and cannot be compared across budgets at all.
+  epoch count and cannot be compared across budgets at all. The English training arm was
+  descoped on cost grounds before it ran (§2.4 †), so this rule was never exercised; it is
+  listed because it was pre-registered, not because it produced a number.
 
 ---
 
@@ -380,7 +451,9 @@ in the whole table by a wide margin.]`
 
 ## 6. Discussion
 
-`[TO WRITE. The five findings, in this order, each already measured:`
+`[TO WRITE. Seven findings, each already measured. Findings 6 and 7 arrived last (2026-08-06)
+and are the strongest in the report, so write them first and let the order below become the
+order of presentation only if that still reads well afterwards:`
 
 1. **Why every delta in this report is quoted against a three-seed mean rather than against a
    single baseline run**, and it is the one to lead with. Write it as method, not as
@@ -406,26 +479,47 @@ in the whole table by a wide margin.]`
 `Then: what the metric cannot see (§2.2) and what the oracle floor implies about the ceiling
 on any coordinate-level change, including the E13 upper bound. Numbers, measured 2026-08-05
 (PROJECT_PLAN.md §2.3): pipeline floor (n=inf) L1 0.1422, below the three-seed baseline mean
-of 0.1621 -- a floor a model can still close by training more, not a wall. Quantization cost
-at the released 128-bin grid is only +0.0021 over that floor. The E13 upper bound (128 to 256
-bins) is +0.0016, under the 0.0097 seed floor -- E13 could not have cleared it no matter how
-it landed, which is why it screened null. Then the floor-estimation point: a floor computed
-from three points is itself noisy, and s-IoU's moved from 0.0401 to 0.0315 on re-measurement,
-which is the same point one level up: a reference computed from few samples is itself a
-sample. Close with the flow-matching head as future work, citing`
-archive/FLOW_MATCHING_PLAN.md`.
+of 0.1621. **Do not read that headroom as "close it by training more" -- earlier drafts did,
+and the 2026-08-06 official-checkpoint measurement kills it**: the authors' own 600-epoch
+weights sit at 0.1629, so four times the budget does not consume the 0.02 of headroom either.
+The floor is better read as the raster convention's own offset, which the sixth finding below
+makes explicit. Quantization cost at the released 128-bin grid is only +0.0021 over that
+floor. The E13 upper bound (128 to 256 bins) is +0.0016, under the 0.0097 seed floor -- E13
+could not have cleared it no matter how it landed, which is why it screened null. Then the
+floor-estimation point: a floor computed from three points is itself noisy, and s-IoU's moved
+from 0.0401 to 0.0315 on re-measurement, which is the same point one level up: a reference
+computed from few samples is itself a sample.`
 
-`Sixth finding, pending the 2026-08-05 evening session (`docs/official-checkpoints-and-600.md`):
-**what "reconstruction error" is measured against turns out to be a choice, and it is worth
-more than any candidate in the sweep.** The pipeline floor of 0.1422 sits below our model's
-0.1621 but far above the paper's 0.080, because the candidate is rendered here through
-cairosvg while the ground truth comes from the dataset's own pre-rendered raster. Two
-rasterizers, one comparison. Scoring the ground-truth outline through the same rasterizer as
-the candidate removes that term. If the released checkpoints reproduce the paper under one
-convention and not the other, this is the strongest single result in the report and it
-belongs in section 2 as a property of the metric, with section 6 drawing the general lesson:
-a metric is a pipeline, not a formula, and two implementations of the same formula can differ
-by more than the effect being measured.]`
+`Sixth finding, MEASURED 2026-08-06 (`docs/official-checkpoints-and-600.md`), and it is the
+strongest single result in the report: **a metric is a pipeline, not a formula, and here two
+implementations of the same formula differ by more than any effect the sweep set out to
+measure.** "Reconstruction error" turns out to depend on a choice nobody states: the
+candidate is rendered through cairosvg, while the ground truth is the dataset's own
+pre-rendered raster from a different rasterizer. Two rasterizers, one comparison. Scoring the
+ground-truth outline through the candidate's rasterizer removes the term, and on one fixed
+released checkpoint that single change moves Chinese from 0.1629 to 0.1174. **0.0455, against
+a paper whose entire margin over its predecessor on this language is 0.006.** The general
+lesson for section 6 writes itself, and the specific lesson is sharper than the general one:
+the effect is 0.0455 on Chinese and 0.0074 on English, tracking the two pipeline floors
+(0.1422 and 0.0253) rather than the two models, so it is a property of a dataset's build and
+not a constant one can correct for once.`
+
+`Seventh finding, same session, and the one to close section 6 on: **we reproduced the
+released model without reproducing the published number, and those are different claims.**
+Our 150-epoch baseline and the authors' released 600-epoch checkpoint are indistinguishable
+through this evaluation, 0.1621 against 0.1629, inside the seed floor. Four times the epochs
+buys nothing, which eliminates training budget. The convention accounts for about half the
+remaining Chinese distance and a Chinese-specific 0.037 stays open, while English under the
+same code reaches 0.0584 against a reported 0.052. Two things worth saying plainly: a
+reproduction can be exact at the level of the artifact and still not land on the reported
+figure, which means the reported figure was carrying information about the evaluation that
+the paper does not state; and this is only visible because the released weights exist. Every
+diagnostic in section 2.4 that separated our error from theirs required a checkpoint to
+compare against, and without one the honest conclusion available to us would have been the
+much weaker "we did not reach 0.080, probably undertrained" that earlier drafts of this
+report in fact carried. Releasing weights is what made the difference between an excuse and
+a measurement. Close with the flow-matching head as future work, citing
+`archive/FLOW_MATCHING_PLAN.md`.]`
 
 ## 7. References
 
