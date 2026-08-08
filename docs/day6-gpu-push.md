@@ -1,7 +1,12 @@
 # Day 6: the final GPU push
 
-Runbook for the 2026-08-08 cluster session (day 6 of 13). Five jobs, ordered by value
+Runbook for the 2026-08-08 cluster session (day 6 of 13). Six jobs, ordered by value
 per GPU-hour, not by interest. Submission is Saturday 15 August, seven days out.
+
+The paper itself, `DeepVecFontV2.pdf`, landed in the repo root on day 6. Reading Sec.
+4.1 against our own protocol turned up a deviation that touches every English number in
+the project and a live lead on the open Chinese residual. **Read §8 before running
+anything**, because it changes how §4 is scored.
 
 Read `PROJECT_PLAN.md` §0, §8 items 10 and 12, and §9 first. Everything below is a
 consequence of those.
@@ -16,6 +21,7 @@ there.
 ---
 
 ## 0. The situation, stated before anything else
+
 
 **Nothing in the report is blocked on a GPU.** Day 5 closed the last two open
 questions: the training budget stays eliminated on Chinese, and E9 does not replicate
@@ -33,6 +39,7 @@ checks whether an existing one is real. That is why it runs first.
 ---
 
 ## 1. Job A: de-confound E1, and audit checkpoint selection
+
 
 **~4 GPU-hours. Highest value per hour in this document. Run it first.**
 
@@ -185,6 +192,7 @@ because it is the evidence for the selection audit.
 
 ## 2. Job B: does `val_metric` rank checkpoints the way the metric does
 
+
 **~15 GPU-minutes. Run it while Job A trains, on whichever GPU is free first.**
 
 The authors' released English checkpoints, one training run, three checkpoints, in
@@ -235,59 +243,186 @@ alongside the flow-matching head.
 
 ---
 
-## 3. Job C: three more English baseline seeds
+## 3. Job C: one replicated candidate per assignment category
 
-**~17.5 GPU-hours each, three GPUs, one overnight. Launch when Job A's training
-finishes.**
 
-The English floor (L1 0.0038, s-IoU 0.0129, SSIM 0.0140) rests on three points. §6's
-own closing argument is that a reference computed from few samples is itself a sample,
-and the s-IoU floor already moved from 0.0401 to 0.0315 on re-measurement. Six points
-is a materially better floor, and the floor is what every English claim is quoted
-against.
+**Chinese, 18 runs, ~18 GPU-h, six waves of three. Replaces the three extra English
+baseline seeds that this section carried until 2026-08-08 evening; those are demoted
+to §5.**
+
+### 3.1 Why this and not more baseline seeds
+
+The instructor's Part 2 brief lists seven example categories of "meaningful"
+architectural change and asks for *"a table with the original results, your
+reconstruction results and the results of your improved paper."* Tiers 1–3 cover six
+of the seven, but **every row in that coverage is a single seed**, and §3.2 measured
+what a single seed is worth here: 22 of 26 candidates beat a single-seed anchor, 6 of
+26 beat the three-seed mean, and the three largest single-seed deltas replicated 1 time
+in 3. A table of single points is a table of draws.
+
+So: one representative per category, three seeds each, and **skip the screening step
+because screening already happened.** The 26 rows in `RESULTS.csv` are the screen.
+Picking a category winner at one seed and then confirming it is the 1-in-3 path, and
+at ~1 h per Chinese run there is no reason to walk it twice.
+
+| Category (instructor's wording) | Representative | Seed-1111 screening L1 | Status |
+|---|---|---|---|
+| Add normalization layers | E2 `--img_norm batch` | 0.1645 | needs 2222, 3333 |
+| Change the encoder or decoder | E4 `--ngf 32` | 0.1691 | needs 2222, 3333 |
+| Change the latent dimension | E5 `--bottleneck_bits 256` | 0.1687 | needs 2222, 3333 |
+| Modify the loss function | E7 `--loss_w_aux 0.1` | 0.1679 | needs 2222, 3333 |
+| Add regularization | E11 `--optimizer adamw --weight_decay 0.01` | 0.1698 | needs 2222, 3333 |
+| Add residual or attention layers | E3 `--n_layers_refine 2` | 0.1705 | needs 2222, 3333 |
+| Change the noise schedule | E9 `--enc_noise_std_train 0.5` | — | **done, 3 seeds** |
+| (same category, capacity axis) | E16 / E17 | — | **Job D, 3 seeds** |
+
+**On the loss representative.** E12 `--kl_beta 0.0` is the better number (0.1649,
+second-best row anywhere), but §8 item 8 records that `val_metric` excludes the KL
+term, so E12's own checkpoint selection is blind to exactly what E12 varies. E7 is a
+paper-versus-code discrepancy from §1.4 — Eq. 11 weights `L_bézier` at 1.0 and the
+code at 0.01 — which makes it a better report row and avoids stacking a second
+selection caveat on top of the one Job A is auditing.
+
+### 3.2 Run all three seeds, not just the two missing ones
+
+`e4_ngf32_chn` and `e5_bneck256_chn` were both selected at **epoch 125** against
+baselines at 150. That is the same confound Job A exists to measure, and two of the six
+representatives already have it. Retraining all eighteen with `--max_ckpt_keep 10` and
+scoring everything at matched epoch 150 builds the whole category table confound-free
+in one pass, rather than retrofitting Job A's fix afterwards.
 
 ```bash
 EXPERIMENTS=(
-  "eng_seedfloor_4444 --seed 4444"
-  "eng_seedfloor_5555 --seed 5555"
-  "eng_seedfloor_6666 --seed 6666"
+  "c_e2_batchnorm_1111_chn --seed 1111 --img_norm batch"
+  "c_e2_batchnorm_2222_chn --seed 2222 --img_norm batch"
+  "c_e2_batchnorm_3333_chn --seed 3333 --img_norm batch"
+  "c_e4_ngf32_1111_chn --seed 1111 --ngf 32"
+  "c_e4_ngf32_2222_chn --seed 2222 --ngf 32"
+  "c_e4_ngf32_3333_chn --seed 3333 --ngf 32"
+  "c_e5_bneck256_1111_chn --seed 1111 --bottleneck_bits 256"
+  "c_e5_bneck256_2222_chn --seed 2222 --bottleneck_bits 256"
+  "c_e5_bneck256_3333_chn --seed 3333 --bottleneck_bits 256"
+  "c_e7_aux01_1111_chn --seed 1111 --loss_w_aux 0.1"
+  "c_e7_aux01_2222_chn --seed 2222 --loss_w_aux 0.1"
+  "c_e7_aux01_3333_chn --seed 3333 --loss_w_aux 0.1"
+  "c_e11_adamw_1111_chn --seed 1111 --optimizer adamw --weight_decay 0.01"
+  "c_e11_adamw_2222_chn --seed 2222 --optimizer adamw --weight_decay 0.01"
+  "c_e11_adamw_3333_chn --seed 3333 --optimizer adamw --weight_decay 0.01"
+  "c_e3_refine2_1111_chn --seed 1111 --n_layers_refine 2"
+  "c_e3_refine2_2222_chn --seed 2222 --n_layers_refine 2"
+  "c_e3_refine2_3333_chn --seed 3333 --n_layers_refine 2"
+)
+
+COMMON_ARGS="--mode train --model_name main_model --language chn --max_seq_len 71 --ref_nshot 8 --batch_size 32 --n_epochs 151 --freq_ckpt 25 --max_ckpt_keep 10"
+```
+
+Score every run at `150_6040.ckpt` explicitly, `n_samples 3`, comparing each candidate's
+three-seed mean against the three-seed baseline mean. Do **not** use
+`test_experiments.sh`, which auto-selects the best-val checkpoint.
+
+### 3.3 Reading rule, pre-committed 2026-08-08
+
+A category counts as an improvement only if its **three-seed mean clears the floor
+(L1 0.0097, s-IoU 0.0315) and the sign is the same at all three seeds** — the bar E9
+had to clear. Anything else is reported at its measured value with the floor beside it
+and called what it is.
+
+**Expect most or all of them to be null**, and write §4 that way in advance. This batch
+exists to give the instructor's table one properly replicated row per category, not
+because six new winners are expected out of candidates already screened as null.
+
+This reopens §8 item 10 a second time. Item 10 declined promoting `e2_batchnorm_chn`
+and `e12_kl000_chn` to replication as *single-seed leaders to chase*. The purpose here
+is different and is stated so it cannot be mistaken: these are **category
+representatives for a required table**, not candidates believed to win. Logged in §8
+item 12 rather than slipped in.
+
+---
+
+## 4. Job C-EN: the same candidates, one seed, on English
+
+
+**English, 6 runs, ~17.5 GPU-h each, ~105 GPU-h, ~35 h wall clock on three GPUs.
+Requested by Ben 2026-08-08 and not optional: the instructor requires coverage of both
+datasets as the original paper reports them.**
+
+### What it is and what it is not
+
+This is a **screening** batch, explicitly. One seed, no replication, searching for a
+candidate that improves on both scripts rather than establishing that any one of them
+does. That framing is the whole justification, because §3.2's measurements say a
+single-seed English point cannot resolve on its own, and the English floor is no
+sharper in relative terms than the Chinese one (6.4% of the mean against 5.7%).
+
+Same six representatives as §3, seed 1111 only, paired against `eng_seedfloor_1111` at
+its own epoch 640. E9 is skipped: it already ran on English at three seeds and did not
+replicate (§5.2).
+
+```bash
+EXPERIMENTS=(
+  "cen_e2_batchnorm_1111_eng --seed 1111 --img_norm batch"
+  "cen_e4_ngf32_1111_eng --seed 1111 --ngf 32"
+  "cen_e5_bneck256_1111_eng --seed 1111 --bottleneck_bits 256"
+  "cen_e7_aux01_1111_eng --seed 1111 --loss_w_aux 0.1"
+  "cen_e11_adamw_1111_eng --seed 1111 --optimizer adamw --weight_decay 0.01"
+  "cen_e3_refine2_1111_eng --seed 1111 --n_layers_refine 2"
 )
 
 COMMON_ARGS="--mode train --model_name main_model --language eng --max_seq_len 51 --ref_nshot 4 --batch_size 32 --n_epochs 631 --freq_ckpt 20 --max_ckpt_keep 3 --wandb_project deepvecfont-v2-eng"
 ```
 
-`--n_epochs 631` is the budget frozen on 2026-08-07 in `docs/english-arm.md` Step 3,
-before any candidate was looked at. **It is not re-derived per seed here.** The three
-original baselines used per-seed `E_conv` values, and re-deriving would make the new
-seeds incomparable to the old ones. Score at the nearest surviving checkpoint to 630,
-the same way §5.2 handled 640 / 580 / 640.
+`--n_epochs 631` is the budget frozen 2026-08-07 in `docs/english-arm.md` Step 3. It is
+not re-derived per candidate. Score at the checkpoint nearest 640, matching the
+seed-1111 baseline.
 
-Score with `n_samples 50` on the 34-font subset, raster convention, matching every
-existing English row:
+### Score at `--n_samples 10`, not 50, and rescore the anchor to match
+
+**Paper, Sec. 4.1, read 2026-08-08:** *"we sample Ns (10 for English and 50 for
+Chinese) synthesized vector glyphs as candidates and select the one as the final output
+that has the highest IOU value."*
+
+**Every English number in this project was produced at `n_samples 50`.** The paper uses
+10 on English. Best-of-N lowers L1 systematically, so our English figures are
+optimistic against the paper's own protocol, and the comparison of our 0.0584 to the
+published 0.052 in §2.4 is not like-for-like. See §8 of this document for the full
+consequence.
+
+So run this batch at `--n_samples 10` and rescore `eng_seedfloor_1111` at
+`--n_samples 10` as the anchor. That is one extra decode of an existing checkpoint, no
+training, and it buys two things at once: a matched screening anchor, and the first
+measurement of how much `n_samples 50` flattered every English row in `RESULTS.csv`.
 
 ```bash
 CUDA_VISIBLE_DEVICES=<gpu> python test_few_shot.py --mode test --name_exp <run> \
   --language eng --max_seq_len 51 --model_name main_model --batch_size 1 \
-  --n_samples 50 --ref_nshot 4 --ref_char_ids 0,1,26,27 --max_fonts 34 --name_ckpt <ckpt>
+  --n_samples 10 --ref_nshot 4 --ref_char_ids 0,1,26,27 --max_fonts 34 --name_ckpt <ckpt>
 ```
 
-### 3.1 Reading rule, pre-committed 2026-08-08
+Label every row's `n_samples` in `RESULTS.csv`. §3.4's rule that numbers compare within
+an `n_samples` column and never across it applies here with force.
 
-**These seeds re-measure the floor. They do not reopen §5.2.** E9's English deltas
-were computed as paired same-seed, same-epoch differences, so additional baseline
-seeds cannot change any of the six deltas — they change only the yardstick those
-deltas are held against.
+### Reading rule, pre-committed 2026-08-08 before launch
 
-If the floor **widens**, the mixed-sign reading in §5.2 is reinforced and nothing is
-rewritten. If the floor **narrows** far enough that some individual E9 deltas clear
-it, the reading still stands, because **mixed sign is mixed sign at any floor**: one
-seed favours E9 on both metrics and two disfavour it on both, and no floor changes
-that. Update the floor numbers wherever §5.2 quotes them, and say in the same
-paragraph that the floor was re-measured after the fact and what it did.
+1. **Nothing clears the English floor at one seed.** The expected outcome. Reported as
+   a screening table covering both datasets, with the floor printed beside it and a
+   sentence saying single-seed English screening cannot resolve differences of this
+   size. That satisfies the coverage requirement honestly.
+2. **Something clears the floor by a clear margin and improves on Chinese too.** Then
+   and only then it earns a three-seed English confirmation, schedule permitting. If
+   the schedule does not permit, it is reported as an unconfirmed screening leader with
+   the 1-in-3 replication base rate quoted next to it. **It is not reported as an
+   improvement on the strength of one seed.**
+3. **Something clears on English but was null on Chinese, or the reverse.** Reported as
+   a script-dependent screening result, which is the same shape as E9's outcome and
+   belongs in §6 next to it rather than in the improvements table.
+
+No re-tuning, no alternative checkpoint, no extra seed chosen after seeing which
+candidate led. The rule that held on day 5 holds here.
 
 ---
 
-## 4. Job D: Tier 4, transformer capacity
+## 5. Job D: Tier 4, transformer capacity
+
 
 **~6 GPU-hours, two waves of three, Chinese. Launch after Job C returns.**
 
@@ -362,7 +497,8 @@ No promotion to confirmation budget for anything that misses it.
 
 ---
 
-## 5. Job E: the two optional cleanups
+## 6. Job E: the two optional cleanups
+
 
 **Only after A through D. Neither changes a conclusion.**
 
@@ -383,25 +519,207 @@ No promotion to confirmation budget for anything that misses it.
 
 ---
 
-## 6. Suggested wall-clock order
+## 7. Demoted: three more English baseline seeds
+
+
+**Demoted to optional 2026-08-08 evening, after Ben challenged it. Do not run unless
+§6 turns out to lean on the English floor harder than it currently does, and only
+after everything above.**
+
+Why it was demoted, recorded because the reasoning generalizes: **it cannot change any
+conclusion.** §5.2's result is mixed sign, and mixed sign is floor-independent. What it
+props up is two §6 claims that move in *opposite* directions — "the paper's own English
+ablation steps sit below our floor" gets stronger if the floor widens, and "our English
+baseline beats the released checkpoints by 1.3× to 1.6× the floor" gets weaker. Since
+the range of a sample grows with n, six seeds will most likely widen the spread and
+weaken the second. It is also the only job that blocks all three GPUs overnight, and
+the Chinese floor is likewise a three-seed estimate that the project has quoted for six
+days without complaint.
+
+**Cheaper substitute if the floor genuinely needs firming:** run `scripts/eval_noise.sh`
+against English. Re-decoding one fixed English checkpoint several times measures the
+*decode* component with no training at all, the way §3.2 decomposed the Chinese floor
+into 0.0011 decode against 0.0082 seed. A few GPU-hours instead of ~52, and it yields a
+§6 sentence either way.
+
+Original text kept below.
+
+*The English floor (L1 0.0038, s-IoU 0.0129, SSIM 0.0140) rests on three points. §6's*
+own closing argument is that a reference computed from few samples is itself a sample,
+and the s-IoU floor already moved from 0.0401 to 0.0315 on re-measurement. Six points
+is a materially better floor, and the floor is what every English claim is quoted
+against.
+
+```bash
+EXPERIMENTS=(
+  "eng_seedfloor_4444 --seed 4444"
+  "eng_seedfloor_5555 --seed 5555"
+  "eng_seedfloor_6666 --seed 6666"
+)
+
+COMMON_ARGS="--mode train --model_name main_model --language eng --max_seq_len 51 --ref_nshot 4 --batch_size 32 --n_epochs 631 --freq_ckpt 20 --max_ckpt_keep 3 --wandb_project deepvecfont-v2-eng"
+```
+
+`--n_epochs 631` is the budget frozen on 2026-08-07 in `docs/english-arm.md` Step 3,
+before any candidate was looked at. **It is not re-derived per seed here.** The three
+original baselines used per-seed `E_conv` values, and re-deriving would make the new
+seeds incomparable to the old ones. Score at the nearest surviving checkpoint to 630,
+the same way §5.2 handled 640 / 580 / 640.
+
+Score with `n_samples 50` on the 34-font subset, raster convention, matching every
+existing English row:
+
+```bash
+CUDA_VISIBLE_DEVICES=<gpu> python test_few_shot.py --mode test --name_exp <run> \
+  --language eng --max_seq_len 51 --model_name main_model --batch_size 1 \
+  --n_samples 50 --ref_nshot 4 --ref_char_ids 0,1,26,27 --max_fonts 34 --name_ckpt <ckpt>
+```
+
+### 3.1 Reading rule, pre-committed 2026-08-08
+
+**These seeds re-measure the floor. They do not reopen §5.2.** E9's English deltas
+were computed as paired same-seed, same-epoch differences, so additional baseline
+seeds cannot change any of the six deltas — they change only the yardstick those
+deltas are held against.
+
+If the floor **widens**, the mixed-sign reading in §5.2 is reinforced and nothing is
+rewritten. If the floor **narrows** far enough that some individual E9 deltas clear
+it, the reading still stands, because **mixed sign is mixed sign at any floor**: one
+seed favours E9 on both metrics and two disfavour it on both, and no floor changes
+that. Update the floor numbers wherever §5.2 quotes them, and say in the same
+paragraph that the floor was re-measured after the fact and what it did.
+
+---
+
+## 8. Three things the paper says that the repo did not know
+
+
+`DeepVecFontV2.pdf` was added to the repo root on 2026-08-08, day 6. Reading Sec. 4.1
+against our own protocol turned up three deviations. The first is material.
+
+### 6.1 `Ns` is 10 on English, and we used 50 everywhere
+
+> *Sec. 4.1: "we sample Ns (10 for English and 50 for Chinese) synthesized vector
+> glyphs as candidates and select the one as the final output that has the highest IOU
+> value."*
+
+Chinese matches: we screen at 3 and confirm at 50. **English does not.** Every English
+row in `RESULTS.csv` — the three baselines, the three E9 seeds, all fourteen official
+checkpoint rows — was produced at `n_samples 50`, five times the paper's budget.
+"Error" is scored after best-of-N selection (§1.2, property 1), and N is not a free
+parameter: a larger N can only lower L1.
+
+Consequences, in descending order of importance:
+
+- **§2.4's English comparison is not like-for-like.** Our 0.0584 against the published
+  0.052 was measured with 5× the candidates, so the true gap is *wider* than the
+  section currently states. This strengthens §2.4's conclusion rather than weakening
+  it — the Chinese-specific residual argument rests on English *nearly* reproducing,
+  and English reproducing less well than we thought makes the two scripts more alike,
+  not less. Rewrite the paragraph carefully; the direction of the correction is not
+  obvious on first reading.
+- **The paired Stage 2 comparisons are unaffected.** Both arms of every English delta
+  in §5.2 used `n_samples 50`, so N cancels the way the raster-convention floor does.
+  No Stage 2 conclusion moves.
+- **Job C-EN fixes it going forward** by screening at 10 and rescoring the seed-1111
+  anchor at 10. That single rescore is also the measurement of the effect's size, for
+  free.
+
+Cheap and worth doing regardless: rescore one existing English checkpoint at N = 10 and
+at N = 50 and report the difference. It is a direct measurement of how much of a
+published best-of-N number is the model and how much is the sampling budget, and it
+sits naturally beside §6's two-rasterizer finding as a second instance of the same
+lesson — *a metric is a pipeline, not a formula.*
+
+### 6.2 The Chinese training set is meant to be augmented 10×
+
+> *Sec. 4.1: "Since the scale of our dataset for Chinese fonts is relatively small, we
+> augmented the training set by applying the affine transformation, enlarging it by ten
+> times."*
+
+`data_utils/augment.py` exists and implements exactly this (shear, scale, rotate), but
+its `--n_aug` **defaults to 5, not 10**, and it is an offline dataset-build step rather
+than part of `dataloader.py`. Nothing in this project's record establishes whether the
+Chinese training data we used was built with it, at what `n_aug`, or not at all.
+
+**This is a live lead on the open Chinese residual of ~0.037** (§2.4, term 2), which
+has been sitting unexplained and which §2.4 attributes vaguely to "the Chinese data or
+test protocol". A training set 10× smaller than the paper's is exactly the kind of
+thing that produces a Chinese-specific gap while English, whose 8035 training fonts
+need no augmentation, reproduces cleanly on the same code path.
+
+**Check this on the cluster, first thing, and it costs no GPU:**
+
+```bash
+cd ~/deepvecfont-v2
+ls data/  &&  du -sh data/chn/*
+python -c "
+from dataloader import get_loader
+import options; o = options.get_parser_main_model().parse_args(
+    ['--language','chn','--max_seq_len','71','--ref_nshot','8'])
+dl = get_loader(o.data_root, o.img_size, 'chn', o.char_num, o.max_seq_len, o.dim_seq, 1, 'train')
+print('chinese train fonts x chars:', len(dl.dataset))
+"
+```
+
+212 training fonts unaugmented gives one number; 212 × 10 gives another. Report which
+one comes back **before** drawing any conclusion, and do not retrain anything on the
+strength of it without a decision recorded in `PROJECT_PLAN.md` §8. A 10× augmented
+retrain is affordable on Chinese (~1 h per run) and would be the single most
+interesting result available, but it is a scope change and gets logged as one.
+
+### 6.3 Test split sizes
+
+The paper reports **1425** English test fonts; this project's §0 records the split as
+**1,386**. Chinese matches exactly at 212 train / 34 test. Worth one sentence in §2.1
+noting the discrepancy and that the English arm was scored on a 34-font deterministic
+subset regardless, so the difference does not propagate into any number.
+
+### 6.4 Two things that do match, checked so they are not re-litigated
+
+- **Candidate selection is by highest IoU**, in the paper and in `test_few_shot.py`
+  (`iou_tmp > iou_max[i]`). No deviation.
+- **Adam at lr 2e-4, 64×64 images, 4 reference glyphs on English and 8 on Chinese.**
+  All match `COMMANDS.md`.
+
+Also useful for §6: Tab. 3's sampling-point parameter study spans 0.0557 → 0.0520
+across six settings, with individual steps of 0.0002 to 0.0014. Like Tab. 1's ablation,
+**every step in it sits below our measured English floor of 0.0038.** That is now two
+of the paper's own tables, not one, whose individual rows this instrument could not
+have resolved.
+
+---
+
+## 9. Suggested wall-clock order
+
 
 | When | Job | GPUs | Wall clock |
 |---|---|---|---|
+| Sat evening | §6.2 augmentation check | none | minutes |
 | Sat evening | A train | 3, 2, 1 | ~1 h |
 | Sat evening | B | one free GPU | ~15 min |
 | Sat evening | A score | 3, 2, 1 | ~2–3 h |
-| Sat night → Sun evening | C train | 3, 2, 1 | ~18 h |
-| Sun evening | C score | 3, 2, 1 | ~3 h |
-| Sun night | D train, two waves | 3, 2, 1 | ~2 h |
-| Mon morning | D score | 3, 2, 1 | ~2 h |
-| Mon onward | E, if wanted | any | — |
+| Sat night | C train, six waves | 3, 2, 1 | ~6 h |
+| Sun morning | C score | 3, 2, 1 | ~3 h |
+| Sun morning | D train, two waves | 3, 2, 1 | ~2 h |
+| Sun midday | D score + N=10/50 rescore | 3, 2, 1 | ~2 h |
+| Sun afternoon → Tue morning | **C-EN train** | 3, 2, 1 | ~35 h |
+| Tue morning | C-EN score | 3, 2, 1 | ~3 h |
+| Tue onward | E, if wanted | any | — |
+
+C-EN is the long pole and everything cheap is deliberately in front of it, so a
+schedule slip costs the least valuable job rather than the most valuable one. If Tuesday
+arrives and C-EN has not finished, **kill it and report the runs that did finish** as a
+partial screening table with the missing rows named. It is a coverage batch; a partial
+coverage table with its gaps stated is worth more than a late submission.
 
 Mac-side over the same period: §6, then §4 and §5, then the vault recording checklist.
 The GPU column and the writing column do not touch.
 
 ---
 
-## 7. Recording checklist
+## 10. Recording checklist
+
 
 Repo first, then vault, per the established pattern.
 
@@ -426,7 +744,8 @@ Repo first, then vault, per the established pattern.
 
 ---
 
-## 8. What is explicitly not happening
+## 11. What is explicitly not happening
+
 
 Listed so it cannot be reopened at 2 a.m. with a free GPU.
 
