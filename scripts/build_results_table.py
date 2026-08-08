@@ -92,6 +92,9 @@ N_SAMPLES = {
     # screening/confirmation split on the English arm, because the whole arm is three
     # runs of one already-screened candidate (docs/english-candidate.md §1).
     "e9_sigma050_1111_eng": 50, "e9_sigma050_2222_eng": 50, "e9_sigma050_3333_eng": 50,
+    # seedfloor600_*_chn: same _n50/_n50_gtsvg suffix issue as official_chn above,
+    # scored at the confirmation budget (docs/english-candidate.md §6).
+    "seedfloor600_1111_chn": 50, "seedfloor600_2222_chn": 50, "seedfloor600_3333_chn": 50,
 }
 
 # eval_<ckpt>_n<N>.csv -> (ckpt, N). Anything without the suffix falls back to

@@ -37,6 +37,8 @@ This document covers both graded stages. It absorbs and replaces `archive/STAGE2
 | English arm | **Descoped 2026-08-06, deliberately.** The test split is 1,386 fonts, 40× Chinese; a full 3-checkpoint sweep projected to ~40 GPU-h and >100 GB against a near-cap quota. Cut to a 34-font deterministic subset plus an 862-font partial decode. The subset is optimistic by 0.0074/0.0106, measured. There is **no self-trained English baseline** — the epoch-600 row was the released checkpoint all along, and is retracted |
 | Disk | 182 GB → 75 GB on 2026-08-06. Checkpoints and decode trees dropped for everything already in `RESULTS.csv`, `eval_*.csv` summaries kept |
 | **English training arm, landed 2026-08-07** | The descoping above was of the official-checkpoint *evaluation*, not of training. Three seeds trained to 801 epochs; `E_conv` computed per seed (400 / 580 / 420) and the budget **frozen at 630** before any candidate was looked at, as §8 item 4 required. Scored at the nearest surviving checkpoint (640 / 580 / 640), `n_samples 50`, 34-font subset, raster |
+| **Job A closed 2026-08-08**: `seedfloor600_*_chn` scored, both conventions | Three seeds, raster mean **0.1583**, 0.0046 below the official 600-epoch checkpoint's 0.1629 and inside the 0.0093 floor. Confirms §2.4's budget-elimination conclusion; gate did not fire, no rewrite needed. §5.1 |
+| **English arm closed 2026-08-08: E9 does not replicate on English** | Three E9 seeds, paired same-seed same-epoch to the English baselines. Mixed sign on both L1 and s-IoU (1 of 3 seeds favourable), all six deltas at or inside the English floor. Outcome 3 of the pre-committed reading rule in `docs/english-candidate.md` §4 — a result, not a failed run. §5.2, §8 item 4 |
 | **English seed floor, first measurement** | L1 spread **0.0038**, s-IoU **0.0129**, SSIM **0.0140** (2026-08-07). Relative to the mean that is 6.4% against Chinese's 5.7%, so the instrument is no sharper on English, it is measuring a smaller quantity. **The paper's published English ablation spans 0.0069 in total with individual steps of ≤0.003, so its individual steps sit below our floor** — a §6 finding about the benchmark, not an excuse. `docs/english-candidate.md` §3 |
 | **English inverts the Chinese finding** | Our 3-seed English baseline (**0.0597** mean L1) scores *better* than the released checkpoints (0.0645 / 0.0649 / 0.0658 at epochs 500 / 550 / 600) on the same 34-font subset, and lands closer to the paper's 0.052. The margin, 0.0048 to 0.0061, is **1.3× to 1.6× the English floor**, so it clears but stays the same order. On Chinese our baseline and the official checkpoint are indistinguishable; on English ours is ahead. English training here is not undertrained relative to the release, and the residual gap on English looks like protocol or metric rather than budget |
 | **English cut-off fired, and was overruled** | ~100 s/epoch × 630 epochs = **~17.5 GPU-h per run**, past `docs/english-arm.md` Step 1's own `> 6 h: drop English` line, reached independently by the timing run and the convergence rule. **Overruled deliberately 2026-08-07** on three free GPUs and six days of schedule slack. Logged as an overrule in `docs/english-arm.md` Step 3 and §8 item 4, and disclosed in `REPORT.md`'s methods rather than absorbed |
@@ -935,15 +937,70 @@ checkpoint (inside a 0.0093 floor, so the reproduction is faithful); 500/550/600
 within 0.0013 in both languages, so the budget is saturated well before 600; and the
 raster-to-svg gap is 0.0455 on Chinese against 0.0074 on English.
 
-**Waiting on a row:** `seedfloor600_<seed>_chn`, trained 2026-08-06, not yet decoded or
-scored. Both conventions when it runs, and it confirms rather than decides — the official
-600-epoch row above already bounds it.
+**Scored 2026-08-07/08 (Job A, `docs/english-candidate.md` §6).** `seedfloor600_<seed>_chn`,
+trained 2026-08-06, three seeds, both GT conventions, `n_samples 50`, best-val-metric
+checkpoint per seed (200/150/200 — pruning kept those, not epoch 600 itself, same
+`best_checkpoint.py` selection every other candidate in this project uses):
+
+| Row | Seed | Ckpt | GT conv. | Fonts | Error (L1) ↓ | s-IoU ↑ | SSIM ↑ |
+|---|---|---|---|---|---|---|---|
+| `seedfloor600_1111_chn` | 1111 | 200 | raster | 33/34 | 0.1635 | 0.3002 | 0.4377 |
+| `seedfloor600_1111_chn` | 1111 | 200 | svg | 33/34 | 0.1236 | 0.4176 | 0.5334 |
+| `seedfloor600_2222_chn` | 2222 | 150 | raster | 34/34 | 0.1614 | 0.2606 | 0.4444 |
+| `seedfloor600_2222_chn` | 2222 | 150 | svg | 34/34 | 0.1324 | 0.3464 | 0.5189 |
+| `seedfloor600_3333_chn` | 3333 | 200 | raster | 34/34 | 0.1500 | 0.3394 | 0.4574 |
+| `seedfloor600_3333_chn` | 3333 | 200 | svg | 34/34 | 0.1237 | 0.4176 | 0.5250 |
+| **3-seed mean** | — | — | raster | — | **0.1583** | 0.3001 | 0.4465 |
+| **3-seed mean** | — | — | svg | — | **0.1266** | 0.3939 | 0.5258 |
+
+**Confirms, does not decide.** Raster mean 0.1583 sits 0.0046 *below* the official 600-epoch
+checkpoint's 0.1629 — the official row's own bound — and well inside the 0.0093 seed-noise
+floor measured for the 150-epoch runs, so this is not a materially better result and §2.4's
+gate does not fire. Training four times longer than the 150-epoch baseline still lands within
+noise of the released weights, exactly as predicted. The one-font renderability miss for seed
+1111 (33/34) is the same font that failed for the 135-epoch reconstruction row above; not a
+new failure mode.
 
 No "combined winners" row is planned. §3.7 says to combine the candidates that cleared the
 floor, and exactly one candidate has a case at all — a combination of one is just E9. If the
 report wants a combination it needs a stated rationale beyond stacking; the only mechanistically
 motivated pairing available is E9 σ=0.5 with E12 `kl_beta=0`, since §3.6 argues the
 reparameterization is close to decorative once additive encoder noise is present.
+
+### 5.2 English generalization (E9), run and closed 2026-08-08
+
+`docs/english-candidate.md`, Jobs B and C. Three E9 `enc_noise_std_train=0.5` seeds, each
+paired to its same-seed English baseline at the matched epoch (§2.2 of that doc: 640/580/640,
+the epoch each baseline was actually scored at, not the full 800-epoch budget). `n_samples 50`,
+34-font subset, raster convention throughout — the only convention the English baselines were
+ever scored at.
+
+| Row | Seed | Ckpt | Error (L1) ↓ | s-IoU ↑ | SSIM ↑ | Fonts |
+|---|---|---|---|---|---|---|
+| `eng_seedfloor_1111` (baseline) | 1111 | 640 | 0.0583 | 0.7371 | 0.7427 | 33/34 |
+| `e9_sigma050_1111_eng` | 1111 | 640 | 0.0602 | 0.7308 | 0.7360 | 33/34 |
+| `eng_seedfloor_2222` (baseline) | 2222 | 580 | 0.0621 | 0.7242 | 0.7287 | 33/34 |
+| `e9_sigma050_2222_eng` | 2222 | 580 | 0.0594 | 0.7344 | 0.7362 | 33/34 |
+| `eng_seedfloor_3333` (baseline) | 3333 | 640 | 0.0587 | 0.7314 | 0.7408 | 34/34 |
+| `e9_sigma050_3333_eng` | 3333 | 640 | 0.0608 | 0.7263 | 0.7353 | 33/34 |
+
+Per-seed delta (candidate − baseline, negative is an improvement on L1):
+
+| Seed | ΔL1 | Δs-IoU | L1 Wilcoxon p (HL shift) | s-IoU Wilcoxon p (HL shift) |
+|---|---|---|---|---|
+| 1111 | +0.0019 | −0.0063 | 0.0267 (+0.00196) | 0.0151 (−0.00762) |
+| 2222 | −0.0027 | +0.0102 | 0.0124 (−0.00171) | 0.0930 (+0.00451) |
+| 3333 | +0.0021 | −0.0051 | 0.6811 (+0.00048) | 0.5317 (−0.00220) |
+
+**Mixed sign on both metrics — outcome 3 of the pre-committed reading rule in
+`docs/english-candidate.md` §4.** One seed (2222) favours E9 on both L1 and s-IoU; the other
+two disfavour it on both. All six per-seed deltas sit inside or barely outside the English
+floor (L1 0.0038, s-IoU 0.0129). Per the rule, fixed before any run launched: **E9 does not
+replicate on English, and this is reported as a result, not a failed run.** It sharpens
+§3.2/§8 item 10's own finding that a single-seed leader on Chinese survived replication only
+1 time in 3 — here, replicating across languages instead of across seeds, the same candidate
+again lands inconclusive rather than confirmed. No re-tuning, no alternative checkpoint, no
+fourth seed was applied, per the rule.
 
 ---
 
@@ -1034,9 +1091,11 @@ These are yours. The plan does not commit to them.
 1. ~~**Tier 2 scope.**~~ **Resolved 2026-08-04: all four, one seed each, eight runs.** ~1 h per run puts this in §3.3's ≤3 h band, so nothing needed cutting. Breadth over depth for the first pass — deepen whichever candidate leads rather than guessing which one deserves three seeds up front. E13 runs without waiting on its oracle gate; see §3.5.
 2. ~~**Tier 3 at all.**~~ **Resolved 2026-08-04: both, in one batch.** The item framed Tier 3 as competing with multi-seed replication for the same slot. At two GPUs and ~1 h per run, sixteen runs is one overnight, so the tier runs as Batch A (breadth, 10 runs) plus Batch B (the three largest deltas at two more seeds each, 6 runs). See §3.6. Batch B is the half to protect if the night is cut short, because it is the one that yields an interpretable number under a null.
 3. ~~**The screening bar itself.**~~ **Resolved and acted on 2026-08-04.** `eval_noise.sh` puts decode noise at 0.0011 and seed noise at ~0.0082 of the 0.0093 floor, so raising `n_samples` will not shrink the bar and multiple seeds is the only lever. Acted on as Batch B in §3.6: three candidates × two additional seeds, chosen as the three largest measured deltas rather than one arbitrary leader, since at this resolution they are indistinguishable from each other. Separately, the **s-IoU** floor is now measured at 0.0401 from the existing seed-floor runs (§3.5) — s-IoU is roughly three times noisier than L1 in relative terms, and the §5 table needs both floors, not just the L1 one.
-4. **English. Sized 2026-08-04, measured 2026-08-07, and the cut-off it produced was overruled the same day.** The rule in `docs/english-arm.md` Step 1 said `> 6 h` per run means drop English. Measured: `E_conv` 580, frozen budget 630, ~100 s/epoch, **~17.5 GPU-hours per run**. The rule fired, and Step 1's timing and Step 2's convergence measurement got there independently. **Overruled deliberately by Ben on 2026-08-07** with three GPUs free and six days of schedule slack that did not exist when the rule was written; three runs across three GPUs is one overnight rather than three days. Recorded as an overrule in `docs/english-arm.md` Step 3 and disclosed in `REPORT.md`'s methods, because a pre-committed rule dropped quietly the one time it is inconvenient is worth less than no rule.
+4. ~~**English.**~~ **Closed 2026-08-08.** Sized 2026-08-04, measured 2026-08-07, cut-off overruled the same day, run 2026-08-07/08. The rule in `docs/english-arm.md` Step 1 said `> 6 h` per run means drop English. Measured: `E_conv` 580, frozen budget 630, ~100 s/epoch, **~17.5 GPU-hours per run**. The rule fired, and Step 1's timing and Step 2's convergence measurement got there independently. **Overruled deliberately by Ben on 2026-08-07** with three GPUs free and six days of schedule slack that did not exist when the rule was written; three runs across three GPUs is one overnight rather than three days. Recorded as an overrule in `docs/english-arm.md` Step 3 and disclosed in `REPORT.md`'s methods, because a pre-committed rule dropped quietly the one time it is inconvenient is worth less than no rule.
 
-   **What runs: E9 `enc_noise_std_train=0.5` at three seeds, paired to the three English baselines. One candidate, not three.** The ordering below anticipated two or three candidates carried across; §0's two 2026-08-05 measurements and Batch B's 1-in-3 replication rate say a single-seed point cannot resolve anything at this scale, and the English L1 floor (0.0038) sits just under E9's own Chinese confirmation delta (0.0040), a ratio of 0.94. Design, per-seed `--n_epochs`, and the pre-committed reading rule: `docs/english-candidate.md`.
+   **What ran: E9 `enc_noise_std_train=0.5` at three seeds, paired to the three English baselines at the matched epoch (640/580/640), not the full 800-epoch budget.** That pairing choice was itself re-litigated before scoring — the obvious alternative was resuming all three past their matched epoch to the full 800 and picking each one's own best-val-metric checkpoint, matching how the baselines were nominally trained. Kept as designed: extending after two of three seeds were already showing a mixed-sign result would have been exactly the kind of post-hoc re-tuning §4 of `docs/english-candidate.md` forbids, and the matched-epoch pairing is the stronger comparison on its own terms (same seed, same epoch, no pruning-survivor confound) — see that doc's §2.2.
+
+   **Result: mixed sign, outcome 3 of the pre-committed reading rule. E9 does not replicate on English.** One seed (2222) favours it on both L1 and s-IoU, two (1111, 3333) disfavour it on both, all six deltas at or inside the noise floor. Full table and Wilcoxon output in §5.2. This is reported as a finding, not a failed run — see §6.
 
    Two sub-questions this closed along the way. The English `--n_samples` discrepancy is settled at **50**, matching the baselines and the official-checkpoint eval rather than §4's 10 or `COMMANDS.md`'s 20. And the epoch budget was frozen from the baseline curves before any candidate was looked at, as required.
 
@@ -1065,13 +1124,21 @@ These are yours. The plan does not commit to them.
 
 ## 9. Do this first
 
-**Current, as of 2026-08-07 (day 5).** The English arm produced its numbers and its cut-off in the same measurement, and the cut-off was overruled. Everything below follows from that. Runbook: `docs/english-candidate.md`.
+**Current, as of 2026-08-08 (day 6).** Jobs A, B and C from day 5's runbook all ran and closed overnight — training budget stays eliminated on Chinese, and E9 does not replicate on English. Both are now measured findings, not open questions, and nothing left in this document is gated on a GPU. Runbook for what ran: `docs/english-candidate.md`.
 
-1. **Cluster, in this order, and the order matters.** Job A first: score `seedfloor600_*_chn`, both conventions, `n_samples 50`, 34 fonts. It is bounded, it is the last open day-4 item, and it **gates §2.4** — if it returns materially better than 0.1629 the section changes again and the report's central claim changes with it, so it should not be discovered after eighteen hours of GPU have gone elsewhere. Then Job B, the three E9 English seeds. Then Job C, score them. Commands in `docs/english-candidate.md` §6–§8.
-2. **Do not deviate from `docs/english-candidate.md` §4 after seeing a result.** The reading rule was fixed before launch precisely because §0 above records a rule being overruled the same day. No re-tuning σ_test, no alternative checkpoint, no fourth seed to break a 2/1 split.
-3. **Write §6.** It now has eight findings and the newest two are the English floor (the paper's own English ablation steps sit below our instrument's resolution) and the inversion (our English baseline beats the released checkpoint while our Chinese one only matches it). Neither depends on how E9 lands, so §6 can be written while the cluster runs. This is the critical path; the English result is additive to it.
-4. **Write §4 and §5's connecting prose.** All the numbers are in. What remains is the backtick-bracketed outline notes.
-5. **Optional, and only after 3 and 4:** finish English checkpoint 500's decode from font 862 to convert the ‡ rows from estimate to measurement, and E14-deep's two peak-lr rows. Neither changes a conclusion.
+1. **Write §6.** It now has nine findings: the eight from day 5 plus the E9-does-not-replicate result (§5.2, §8 item 4). None of the nine depends on anything still running — this is the critical path.
+2. **Write §4 and §5's connecting prose**, including §5.2's new table.
+3. **Recording checklist from `docs/english-candidate.md` §9** — repo done (`PROJECT_PLAN.md` §0/§5.2/§8, `RESULTS.csv`), vault still open: `Runs/Run Log.md` (six new training/eval rows), `Experiments/Experiment Tracker.md` (E9 English status → does-not-replicate), `_Open Tasks.md` checkboxes and `updated:` frontmatter.
+4. **Optional, and only after 1–3:** finish English checkpoint 500's decode from font 862 to convert the ‡ rows from estimate to measurement, and E14-deep's two peak-lr rows. Neither changes a conclusion.
+5. **Not planned:** re-running E9 English to the full 800-epoch budget with independent best-checkpoint selection. Considered and declined 2026-08-08 — see §8 item 4's note on why the matched-epoch pairing was kept as designed rather than extended after a partial result was already in.
+
+*Day 5's list, kept for provenance; every item on it is done:*
+
+1. ~~**Cluster, in this order, and the order matters.**~~ **Done 2026-08-08.** Job A (`seedfloor600_*_chn`, both conventions) closed first, confirmed rather than overturned §2.4 — see §5.1. Job B (three E9 English seeds) trained cleanly to their matched epochs overnight. Job C scored them; mixed sign, §5.2.
+2. ~~**Do not deviate from `docs/english-candidate.md` §4 after seeing a result.**~~ **Held 2026-08-08.** No re-tuning, no alternative checkpoint, no fourth seed, even after the epoch-budget question was reopened before scoring (§8 item 4's note).
+3. **Write §6.** Superseded by day 6's item 1 above — the two English findings this pointed at are now joined by the E9-non-replication result.
+4. **Write §4 and §5's connecting prose.** Superseded by day 6's item 2.
+5. **Optional item.** Carried forward unchanged to day 6's item 4.
 
 *Day 4's list, kept for provenance. Items 1, 2 and 3 are done; item 4 is now day 5's item 1:*
 
