@@ -206,7 +206,11 @@ class Transformer_decoder(nn.Module):
         # 0.0, so the baseline is unchanged.
         p_drop = opts.dropout if dropout is None else dropout
         attn = MultiHeadedAttention(h=8, d_model=512, dropout=p_drop)
-        ff = PositionwiseFeedForward(d_model=512, d_ff=1024, dropout=p_drop)
+        # E17. d_ff was hardcoded to 1024 against d_model=512, a 2x expansion where the
+        # transformer default is 4x. This `ff` is deep-copied into both decoder stacks
+        # below, so one flag widens the autoregressive decoder and the refinement
+        # decoder together. Defaults to 1024, the released value.
+        ff = PositionwiseFeedForward(d_model=512, d_ff=opts.dec_d_ff, dropout=p_drop)
         self.decoder_layers = clones(DecoderLayer(512, c(attn), c(attn),c(ff), dropout=p_drop), 6)
         self.decoder_norm = nn.LayerNorm(512)
         # E3. Sec. 3.3 calls the self-refinement module "a 2-layer Transformer decoder";

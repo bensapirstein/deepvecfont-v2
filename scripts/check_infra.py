@@ -678,6 +678,45 @@ def check_tier3_wiring():
         check("E2: an unknown --img_norm is rejected", True)
 
 
+def check_tier4_wiring():
+    """Static check that the Tier 4 capacity flags reach the model.
+
+    Same guard as sections 5, 7 and 8, and it matters more here than anywhere else:
+    a capacity flag that does not reach the constructor produces a run with the
+    baseline's parameter count and the candidate's name, which is the one failure
+    mode that looks exactly like a null result. Wired 2026-08-08; see
+    PROJECT_PLAN.md 8 item 12.
+    """
+    print("\n9. tier 4 wiring: E16 encoder depth / E17 decoder ff width [static, source]")
+
+    with open(os.path.join(REPO, 'models', 'model_main.py')) as fh:
+        mm_src = fh.read()
+    with open(os.path.join(REPO, 'models', 'transformers.py')) as fh:
+        tf_src = fh.read()
+
+    check("E16: Transformer(depth=...) reads the flag",
+          "depth = opts.enc_depth" in mm_src)
+    check("E16: the hardcoded depth = 6 is gone from model_main",
+          "depth = 6," not in mm_src)
+    check("E17: PositionwiseFeedForward reads the flag",
+          "d_ff=opts.dec_d_ff" in tf_src)
+    check("E17: the hardcoded d_ff=1024 is gone from the decoder",
+          "d_ff=1024" not in tf_src)
+
+    # Defaults must jointly reproduce the release, or every table before today
+    # stops being a valid reference.
+    try:
+        sys.path.insert(0, REPO)
+        from options import get_parser_main_model
+        defaults = get_parser_main_model().parse_args([])
+        check("E16 default is 6 (released encoder depth)", defaults.enc_depth == 6,
+              f"got {defaults.enc_depth}")
+        check("E17 default is 1024 (released decoder ff width)", defaults.dec_d_ff == 1024,
+              f"got {defaults.dec_d_ff}")
+    except Exception as exc:  # pragma: no cover - argparse import failure
+        check("tier 4 defaults are importable", False, repr(exc))
+
+
 def main():
     print("Pre-flight infrastructure checks -- " + REPO)
     check_options()
@@ -688,6 +727,7 @@ def main():
     check_checkpoint_metric()
     check_tier2_wiring()
     check_tier3_wiring()
+    check_tier4_wiring()
 
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed")
     if FAILED:

@@ -116,4 +116,20 @@ def get_parser_main_model():
     parser.add_argument('--ema_decay', type=float, default=0.0, help='[E15] decay of an exponential moving average of the weights, evaluated and checkpointed in place of the raw weights. 0 disables it and keeps the original behaviour; 0.999 is the usual value')
     parser.add_argument('--ema_warmup_steps', type=int, default=0, help='[E15] steps before the EMA starts tracking; the shadow is initialized from the weights, so 0 is fine and this exists only for the record')
 
+    # ---- Tier 4, transformer capacity. Added 2026-08-08, PROJECT_PLAN.md 8 item 12.
+    # The one axis in the assignment's example list that Tiers 1-3 never varied. E4
+    # widened the image stacks and E5 the latent; neither touched the sequence
+    # transformer itself, whose width and depth are the model's actual capacity.
+    # Same default-reproduces-the-release discipline as every tier before this.
+    #   enc_depth -> models/model_main.py, Transformer(depth=...)        (E16)
+    #   dec_d_ff  -> models/transformers.py, Transformer_decoder         (E17)
+    #
+    # Both change parameter count, so both shift the global RNG stream for every
+    # module constructed after them -- the same objection that kept E6 off the
+    # candidate list. It is answered here by running three seeds rather than one:
+    # an init shift is a seed draw, and averaging over three of them is exactly
+    # what makes a capacity change readable at all. Never run either at one seed.
+    parser.add_argument('--enc_depth', type=int, default=6, help='[E16] depth of the sequence encoder; the released value is 6, and with self_per_cross_attn=2 that is 12 self-attention blocks. 8 gives 16')
+    parser.add_argument('--dec_d_ff', type=int, default=1024, help='[E17] feed-forward width of the decoder stack, hardcoded to 1024 upstream against d_model=512 (a 2x expansion where the transformer literature default is 4x). Feeds both the autoregressive decoder and the refinement decoder that produces the scored output')
+
     return parser

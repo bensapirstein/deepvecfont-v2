@@ -24,8 +24,11 @@ class ModelMain(nn.Module):
             input_axis = 2,              # number of axis for input data (2 for images, 3 for video)
             num_freq_bands = 6,          # number of freq bands, with original value (2 * K + 1)
             max_freq = 10.,              # maximum frequency, hyperparameter depending on how fine the data is
-            depth = 6,                   # depth of net. The shape of the final attention mechanism will be:
-                                         # depth * (cross attention -> self_per_cross_attn * self attention)
+            depth = opts.enc_depth,      # E16. Released value 6; with self_per_cross_attn=2
+                                         # that is 12 self-attention blocks and 0 cross-attention
+                                         # blocks, since the cross path is constructed and never
+                                         # called (see PROJECT_PLAN.md 1.4). depth * (cross
+                                         # attention -> self_per_cross_attn * self attention)
             num_latents = 256,           # number of latents, or induced set points, or centroids. different papers giving it different names
             latent_dim = opts.dim_seq_latent,            # latent dimension
             cross_heads = 1,             # number of heads for cross attention. paper said 1
