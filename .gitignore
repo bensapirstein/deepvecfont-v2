@@ -93,3 +93,16 @@ target/
 # IPython
 profile_default/
 ipython_config.py
+
+# --- report assets -----------------------------------------------------------
+# Tarballs from the cluster figure-asset pull (docs/pull-figure-assets.md). The
+# unpacked HTML under report/assets/ is small and IS tracked, so the figures stay
+# reproducible from a clone; the archive itself is not.
+*.tar.gz
+*.tgz
+
+# Deliberately NOT ignored, so a fresh clone can rebuild the submission:
+#   report/figures/*.png     generated, but data.zip is ignored, so a clone
+#                            could not otherwise show them
+#   report/assets/glyphs.npz the 0.07 MB glyph input, extracted from data.zip
+#   report/REPORT.pdf        the deliverable itself

@@ -6,6 +6,12 @@ Paper: Wang, Wang, Yu, Zhu, Lian. *DeepVecFont-v2: Exploiting Transformers to Sy
 Vector Fonts with Higher Quality.* CVPR 2023. Course topic: autoregressive models.
 Code: fork of `yizhiwang96/deepvecfont-v2`. All our work is the `main..repro` diff.
 
+![One letter, five ways](figures/fig1_teaser.png)
+
+*The same letter B, from a font in the English test split. The model reads and writes the
+command sequence in panel 4. The score everyone reports compares panel 5. Most of what this
+report measures turns out to live in the distance between those two panels.*
+
 ## Abstract
 
 We reproduce DeepVecFont-v2 on Chinese and English vector font synthesis, then run 21
@@ -30,6 +36,16 @@ things worse. The rest are indistinguishable from noise.
 DeepVecFont-v2 generates a full vector font from a few reference glyphs. It uses two
 modalities at once: a 64×64 raster image of each glyph and the glyph's outline as a sequence
 of drawing commands.
+
+![The terms this report uses](figures/fig2_anatomy.png)
+
+*The vocabulary, on real data. A **glyph** is one character drawn in one style; a **font** is
+a whole alphabet drawn consistently. Its **outline** is built from segments, either straight
+or **cubic Bézier**, where each curve is fixed by two **on-curve points** it passes through
+and two **control points** it does not. To **render** is to turn that outline into pixels.
+The model never emits a raw coordinate: it picks one of 128 **bins** per axis, so it can
+only place a point on that grid. And it works **few-shot**, seeing four reference glyphs and
+having to draw the other forty-eight.*
 
 **Encoders.** A CNN encodes the reference images. A Transformer encodes the reference
 command sequences. The two are fused into one latent vector per font.
@@ -131,7 +147,7 @@ taken from the dataset's pre-rendered images.
 | Released weights, English, epoch 600 | 0.0658 | 0.7029 | 0.7181 |
 | **Our reconstruction, English**, 3-seed mean, 630 epochs | **0.0597** | 0.7309 | 0.7374 |
 
-![Paper, released weights, our reconstruction and our improved model](figures/fig2_threeway.png)
+![Paper, released weights, our reconstruction and our improved model](figures/fig3_threeway.png)
 
 We did not reach the published numbers. We did reproduce the released model, and those are
 different claims.
@@ -258,7 +274,7 @@ English.
 
 ### 5.2 What the sweep returned
 
-![26 changes against 3 re-seedings](figures/fig1_spread.png)
+![26 changes against 3 re-seedings](figures/fig5_spread.png)
 
 Twenty-six candidate configurations span 0.0101. Three runs of the unmodified model span
 0.0097. Twenty-six draws from one distribution should cover roughly 2.3 times the range of
@@ -297,7 +313,7 @@ throw away the only thing that makes the sweep worth reading.
 
 ### 5.4 It does not transfer to English
 
-![E9 per seed on both languages](figures/fig3_e9.png)
+![E9 per seed on both languages](figures/fig6_e9.png)
 
 We repeated E9 on English at three seeds, paired the same way. One seed favours it on both
 metrics and two go against it. Every difference is inside the English floor.

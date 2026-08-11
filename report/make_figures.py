@@ -1,7 +1,7 @@
 """Regenerate every figure in REPORT.md from RESULTS.csv.
 
 Usage:  python report/make_figures.py
-Writes: report/figures/fig1_spread.png .. fig4_convention.png
+Writes: report/figures/fig5_spread.png .. fig4_convention.png
 
 No figure in the report is drawn by hand. If RESULTS.csv changes, rerun this.
 """
@@ -47,7 +47,7 @@ def one(**kw):
 f = lambda r, k: float(r[k])
 mean = lambda x: sum(x) / len(x)
 
-# ---------------------------------------------------------------- figure 1
+# ---------------------------------------------------------------- figure 5
 # The headline: 26 architectural changes span no more than 3 re-seedings do.
 fig, ax = plt.subplots(figsize=(7.2, 2.9))
 base = [f(one(name_exp=f"seedfloor_{s}_chn", epoch=150, n_samples=3), "l1") for s in (1111, 2222, 3333)]
@@ -64,9 +64,9 @@ ax.set_title(f"Changing the architecture moves the metric as much as changing th
              f"candidates span {max(cands)-min(cands):.4f}   ·   3 re-seedings span {max(base)-min(base):.4f}",
              fontsize=9.5, loc="left")
 ax.legend(frameon=False, fontsize=8, loc="upper left")
-fig.savefig(f"{OUT}/fig1_spread.png"); plt.close(fig)
+fig.savefig(f"{OUT}/fig5_spread.png"); plt.close(fig)
 
-# ---------------------------------------------------------------- figure 2
+# ---------------------------------------------------------------- figure 3
 # Paper vs reconstruction vs improved, both languages.
 fig, axes = plt.subplots(1, 2, figsize=(7.6, 2.9))
 cb = [f(one(name_exp=f"seedfloor_{s}_chn", epoch=150, n_samples=50), "l1") for s in (1111, 2222, 3333)]
@@ -97,9 +97,9 @@ for ax, (lang, paper, offi, rec, imp) in zip(axes, [
 axes[0].set_ylabel("Error (L1), lower is better")
 fig.suptitle("Our reconstruction matches the released weights; neither reaches the published number",
              fontsize=9.5, x=.02, ha="left", y=1.04)
-fig.savefig(f"{OUT}/fig2_threeway.png"); plt.close(fig)
+fig.savefig(f"{OUT}/fig3_threeway.png"); plt.close(fig)
 
-# ---------------------------------------------------------------- figure 3
+# ---------------------------------------------------------------- figure 6
 # E9 per seed, paired. Chinese all same sign; English mixed.
 fig, axes = plt.subplots(1, 2, figsize=(7.2, 2.7), sharey=False)
 seeds = ["1111", "2222", "3333"]
@@ -121,7 +121,7 @@ for ax, (lang, d, floor) in zip(axes, [("Chinese", chn_d, 0.0097), ("English", e
 axes[0].set_ylabel("Δ Error (L1) vs paired baseline\nnegative = better")
 fig.suptitle("The one improvement we found does not survive a change of script\n"
              "shaded band is the seed-noise floor", fontsize=9.5, x=.02, ha="left", y=1.09)
-fig.savefig(f"{OUT}/fig3_e9.png"); plt.close(fig)
+fig.savefig(f"{OUT}/fig6_e9.png"); plt.close(fig)
 
 # ---------------------------------------------------------------- figure 4
 # The metric depends on an unstated choice of rasterizer.
