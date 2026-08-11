@@ -43,6 +43,22 @@ checks whether an existing one is real. That is why it runs first.
 
 **~4 GPU-hours. Highest value per hour in this document. Run it first.**
 
+**Launched 2026-08-08 14:02, closed ~14:20.** `a_e1_norm_2222_chn` (GPU 3),
+`a_e1_norm_3333_chn` (GPU 2), `a_seedfloor_3333_chn` (GPU 1), all trained,
+`--max_ckpt_keep 10`. `check_infra.py` ran clean first (210 passed, 0 failed).
+§8.2's augmentation check also ran first (no GPU needed): 1272 train entries,
+212 base fonts × 6 (`n_aug=5`, not the paper's 10x) — recorded in
+`PROJECT_PLAN.md` §0, not acted on per that section's own gate.
+
+**Scored.** §1.4's exact command omits `--enc_final_norm True` for the two E1
+legs, which crashes `load_state_dict` on the extra LayerNorm keys (COMMANDS.md
+already documents this requirement for any flag that adds parameters) — fixed
+before rerun. **Outcome 1 of §1.5's reading rule**: E1's s-IoU deficit holds at
+matched epoch 150 at all three seeds, beyond the 0.0315 floor, but shrinks from
+the confounded mean of −0.0760 (2.4× floor) to **−0.0376 (1.2× floor)**. Full
+numbers and the val_metric-vs-rendered ordering side-finding in `PROJECT_PLAN.md`
+§0. `REPORT.md` and `RESULTS.csv` updated.
+
 ### 1.1 What is wrong
 
 `REPORT.md` §5 carries E1 (terminal encoder LayerNorm) as the project's one effect
@@ -195,6 +211,19 @@ because it is the evidence for the selection audit.
 
 **~15 GPU-minutes. Run it while Job A trains, on whichever GPU is free first.**
 
+**Closed 2026-08-08 ~14:35.** `val_on_checkpoint.py` had a real, previously
+unexercised bug: `models/transformers.py` and `models/modality_fusion.py` both
+call `get_parser_main_model().parse_args()` at module import time against real
+`sys.argv`, so importing `ModelMain` before this script's own custom flags
+(`--ckpt_path`, `--tag`, `--csv_out`) were registered crashed on "unrecognized
+arguments" every time. Fixed by stripping those three flags out of `sys.argv`
+before the import chain runs. **Outcome 2**: English `val_metric` prefers
+checkpoint 600 (opposite the rendered ranking, which prefers 500); Chinese
+disagrees too (`val_metric` ranks 500 best / 600 worst, rendered s-IoU ranks
+the reverse). `val_metric` does not track the rendered metric on either
+language. Full numbers in `PROJECT_PLAN.md` §0 and `val_metric_audit.csv`.
+Per the scope guard below, not switching checkpoint selection.
+
 The authors' released English checkpoints, one training run, three checkpoints, in
 `RESULTS.csv`:
 
@@ -265,16 +294,28 @@ because screening already happened.** The 26 rows in `RESULTS.csv` are the scree
 Picking a category winner at one seed and then confirming it is the 1-in-3 path, and
 at ~1 h per Chinese run there is no reason to walk it twice.
 
-| Category (instructor's wording) | Representative | Seed-1111 screening L1 | Status |
-|---|---|---|---|
-| Add normalization layers | E2 `--img_norm batch` | 0.1645 | needs 2222, 3333 |
-| Change the encoder or decoder | E4 `--ngf 32` | 0.1691 | needs 2222, 3333 |
-| Change the latent dimension | E5 `--bottleneck_bits 256` | 0.1687 | needs 2222, 3333 |
-| Modify the loss function | E7 `--loss_w_aux 0.1` | 0.1679 | needs 2222, 3333 |
-| Add regularization | E11 `--optimizer adamw --weight_decay 0.01` | 0.1698 | needs 2222, 3333 |
-| Add residual or attention layers | E3 `--n_layers_refine 2` | 0.1705 | needs 2222, 3333 |
-| Change the noise schedule | E9 `--enc_noise_std_train 0.5` | — | **done, 3 seeds** |
-| (same category, capacity axis) | E16 / E17 | — | **Job D, 3 seeds** |
+**Closed 2026-08-08.** Scored at matched epoch 150, `n_samples 3`, all 18 runs
+clean (one renderability caveat on `c_e4_ngf32_2222_chn`: 32/34 fonts, two
+skipped, per `eval_reconstruction_error.py`'s own warning -- doesn't change
+that row's reading, since E4 was already mixed-sign). Reading rule: three-seed
+mean clears the floor (L1 0.0097, s-IoU 0.0315) **and** same sign at all three
+seeds. **All six null**, as predicted. E2 (batchnorm) is the one worth a
+sentence: same sign at all three seeds on *both* L1 (mean −0.0066) and s-IoU
+(mean +0.0221), the only category with consistent direction on both metrics,
+but both means sit under their floor. Everything else is mixed-sign on at
+least one metric. Full per-seed deltas in `PROJECT_PLAN.md` §0; rows in
+`RESULTS.csv` (`job-c-category` batch).
+
+| Category (instructor's wording) | Representative | 3-seed mean L1 (Δ vs baseline) | 3-seed mean s-IoU (Δ) | Same sign? | Status |
+|---|---|---|---|---|---|
+| Add normalization layers | E2 `--img_norm batch` | 0.1614 (−0.0066) | 0.2623 (+0.0221) | yes/yes | null, sub-floor both metrics |
+| Change the encoder or decoder | E4 `--ngf 32` | 0.1738 (+0.0059) | 0.2575 (+0.0173) | no/no | null, mixed sign |
+| Change the latent dimension | E5 `--bottleneck_bits 256` | 0.1670 (−0.0010) | 0.2605 (+0.0203) | no/no | null, mixed sign |
+| Modify the loss function | E7 `--loss_w_aux 0.1` | 0.1670 (−0.0010) | 0.2349 (−0.0053) | no/no | null, mixed sign |
+| Add regularization | E11 `--optimizer adamw --weight_decay 0.01` | 0.1669 (−0.0011) | 0.2419 (+0.0017) | no/no | null, mixed sign |
+| Add residual or attention layers | E3 `--n_layers_refine 2` | 0.1676 (−0.0004) | 0.2409 (+0.0007) | no/no | null, mixed sign |
+| Change the noise schedule | E9 `--enc_noise_std_train 0.5` | — | — | yes/yes | **the one finding, 3 seeds** |
+| (same category, capacity axis) | E16 / E17 | — | — | — | **Job D, 3 seeds** |
 
 **On the loss representative.** E12 `--kl_beta 0.0` is the better number (0.1649,
 second-best row anywhere), but §8 item 8 records that `val_metric` excludes the KL
@@ -401,6 +442,17 @@ CUDA_VISIBLE_DEVICES=<gpu> python test_few_shot.py --mode test --name_exp <run> 
 Label every row's `n_samples` in `RESULTS.csv`. §3.4's rule that numbers compare within
 an `n_samples` column and never across it applies here with force.
 
+**Progress, 2026-08-09.** `cen_e2_batchnorm`, `cen_e4_ngf32`, `cen_e5_bneck256`
+finished their 631-epoch budget and scored (n=10, checkpoint 620, anchor
+rescored at n=10 too: **L1 0.0610, s-IoU 0.7270**, against 0.0583/0.7371 at
+n=50 -- first direct measurement of the n=10-vs-50 gap this section
+predicted). `cen_e2_batchnorm` and `cen_e4_ngf32` null (neither clears the
+floor). `cen_e5_bneck256` clears the floor on both metrics in the *degrading*
+direction (outcome 3, script-dependent, not promoted). `cen_e7_aux01` was
+killed early by Ben's call on its wandb curve (epoch 294/631, no score).
+`cen_e11_adamw` and `cen_e3_refine2` training now. Full numbers in
+`PROJECT_PLAN.md` §0.
+
 ### Reading rule, pre-committed 2026-08-08 before launch
 
 1. **Nothing clears the English floor at one seed.** The expected outcome. Reported as
@@ -425,6 +477,13 @@ candidate led. The rule that held on day 5 holds here.
 
 
 **~6 GPU-hours, two waves of three, Chinese. Launch after Job C returns.**
+
+**Closed 2026-08-09.** Same epoch-selection confound as Job A: `val_metric`
+picked epoch 125 over 150 for 5 of the 6 runs. Every 150 checkpoint was still
+on disk (this cluster trains fast enough that `--max_ckpt_keep 2` hadn't
+pruned it yet), so scored directly at matched 150 rather than retraining.
+**Both E16 and E17 null**, mixed sign on both metrics -- exactly the expected
+outcome per §4.3. Numbers in `PROJECT_PLAN.md` §0, rows in `RESULTS.csv`.
 
 ### 4.1 Why this reopens a closed scope decision
 

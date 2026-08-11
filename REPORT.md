@@ -45,7 +45,9 @@ the random seed does. One candidate survives: additive Gaussian noise on the seq
 encoder at train-time σ = 0.5, which improves L1 by 0.0040 and s-IoU by 0.0271 against the
 baseline mean, with the same sign at all three seeds on both metrics. One candidate is a
 reproducible defect: a terminal LayerNorm on the sequence encoder degrades s-IoU at all three
-seeds by a mean of 0.0760, which is 2.4 times that metric's own floor.
+seeds by a mean of 0.0376 at matched checkpoint epoch, 1.2 times that metric's own floor,
+after an epoch-selection audit showed the originally reported 0.0760 mixed baseline and
+candidate checkpoints from different training epochs.
 
 ---
 
@@ -467,9 +469,11 @@ the six confirmation rows plus the Wilcoxon column, already measured:`
 `Delta against the baseline mean: L1 −0.0040, s-IoU +0.0271. s-IoU Wilcoxon: p = 0.0001
 (+0.0317), p = 0.0000 (+0.0453), p = 0.4417 (+0.0045). Test-time σ stays at the released 1.0:
 both six-point ladders land inside the 0.0011 decode-noise band. Add the full screening table
-from` scripts/recompute_deltas.py `and the E1 negative result: mean s-IoU −0.0760 across the
-three seeds, 2.4× the 0.0315 floor, with its seed-3333 leg at s-IoU 0.1095, the lowest value
-in the whole table by a wide margin.]`
+from` scripts/recompute_deltas.py `and the E1 negative result, RE-MEASURED 2026-08-08 after
+the epoch-selection audit below: mean s-IoU −0.0376 across the three seeds at matched epoch
+150 (screening budget, per-seed baseline), 1.2× the 0.0315 floor, same sign at all three
+seeds. This supersedes the original −0.0760/2.4× figure, which mixed epochs 100, 125 and 150
+across baseline and candidate -- see Job A below.]`
 
 ## 6. Discussion
 
@@ -497,6 +501,27 @@ order of presentation only if that still reads well afterwards:`
 4. **The cheap proxy does not work**, ρ = 0.125. §3.4.
 5. **E9 replicates across budgets** at reduced magnitude, and the seed spread does *not*
    shrink at confirmation budget, exactly as the noise decomposition predicted.
+6. **E1's s-IoU defect was partly, but not fully, a checkpoint-selection artifact.** Every
+   Chinese baseline in this report was scored at epoch 150, but the two E1 seeds carrying the
+   worst deficits had been auto-selected by `val_metric` at epochs 125 and 100 -- the two
+   checkpoints scored earliest, at the point furthest from convergence. Retraining both legs
+   with every checkpoint kept and re-reading at matched epoch 150 (`docs/day6-gpu-push.md`
+   Job A, 2026-08-08) shrinks the effect from mean s-IoU −0.0760 (2.4× the floor) to −0.0376
+   (1.2× the floor) but does not remove it: the sign holds at all three seeds, and the
+   retrained baseline reproduces the original seedfloor_3333 run within 0.0012 L1, well
+   inside the seed floor, so the retrain itself is trustworthy. Worth a sentence on its own:
+   within these same three retrains, `val_metric` agreed with the rendered metric on which
+   checkpoint was best (150, in all three) but disagreed on the ordering of epochs 100 and
+   125 -- `val_metric` ranked 100 above 125 in every one of the three runs, while every
+   rendered L1 and s-IoU number ranked 125 above 100. A small, reproducible instance of §3.4's
+   larger point that no term in the selection criterion is the quantity being reported.
+7. **The released checkpoints themselves show the same disconnect.** Computing `val_metric`
+   directly on the authors' three official English checkpoints (`docs/day6-gpu-push.md` Job
+   B, 2026-08-08) shows it prefers checkpoint 600 -- the one they shipped -- while every
+   rendered metric prefers 500 and ranks 600 worst (L1 0.0645 vs 0.0658). Chinese disagrees in
+   a different direction: `val_metric` ranks 500 best and 600 worst, while rendered s-IoU
+   ranks the reverse. Selection was never validated against the metric it exists to serve, on
+   either side of this project.
 
 `Then: what the metric cannot see (§2.2) and what the oracle floor implies about the ceiling
 on any coordinate-level change, including the E13 upper bound. Numbers, measured 2026-08-05

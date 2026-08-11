@@ -31,10 +31,9 @@ fi
 # - sequential: only GPUS[0] is ever used, one experiment at a time.
 # - parallel: EXPERIMENTS runs in waves of len(GPUS) -- one experiment per id
 #   per wave, however many waves it takes to get through the whole array.
-# Restricted to 2 GPUs as of 2026-08-04 (user directive) -- GPU 3 is off limits
-# going forward, not just for this run. The already-running Tier 2 batch that
-# used GPU 3 in waves 1-2 was left to finish rather than killed.
-GPUS=(1 2)
+# GPU allocation set by Ben 2026-08-08 (docs/day6-gpu-push.md): use 3, 2, 1.
+# GPU 0 stays free.
+GPUS=(3 2 1)
 
 # One entry per experiment: "name_exp  <extra args appended to COMMON_ARGS>".
 # This is the loop-over-params spot — add/edit lines here for a sweep.
@@ -60,6 +59,57 @@ GPUS=(1 2)
 # Run A then B in one go: leave both blocks uncommented and launch parallel. To
 # stop after A, comment out the Batch B block.
 EXPERIMENTS=(
+  # Job A, 2026-08-08 (docs/day6-gpu-push.md §1). Retrains of E1's two
+  # degrading legs plus one matched baseline, all with every checkpoint kept
+  # (--max_ckpt_keep 10 below), so E1 can be read at matched epoch 150 against
+  # a baseline at 150 and the val_metric-vs-rendered ordering can be checked
+  # within a run. a_ prefix keeps these separate from the originals in
+  # experiments/ and RESULTS.csv -- the confound is itself a finding and the
+  # old rows are its evidence.
+  "a_e1_norm_2222_chn --seed 2222 --enc_final_norm True"
+  "a_e1_norm_3333_chn --seed 3333 --enc_final_norm True"
+  "a_seedfloor_3333_chn --seed 3333"
+)
+
+EXPERIMENTS_ARCHIVE_JOB_A="${EXPERIMENTS[*]}"
+EXPERIMENTS_ARCHIVE_JOB_C=(
+  "c_e2_batchnorm_1111_chn --seed 1111 --img_norm batch"
+  "c_e2_batchnorm_2222_chn --seed 2222 --img_norm batch"
+  "c_e2_batchnorm_3333_chn --seed 3333 --img_norm batch"
+  "c_e4_ngf32_1111_chn --seed 1111 --ngf 32"
+  "c_e4_ngf32_2222_chn --seed 2222 --ngf 32"
+  "c_e4_ngf32_3333_chn --seed 3333 --ngf 32"
+  "c_e5_bneck256_1111_chn --seed 1111 --bottleneck_bits 256"
+  "c_e5_bneck256_2222_chn --seed 2222 --bottleneck_bits 256"
+  "c_e5_bneck256_3333_chn --seed 3333 --bottleneck_bits 256"
+  "c_e7_aux01_1111_chn --seed 1111 --loss_w_aux 0.1"
+  "c_e7_aux01_2222_chn --seed 2222 --loss_w_aux 0.1"
+  "c_e7_aux01_3333_chn --seed 3333 --loss_w_aux 0.1"
+  "c_e11_adamw_1111_chn --seed 1111 --optimizer adamw --weight_decay 0.01"
+  "c_e11_adamw_2222_chn --seed 2222 --optimizer adamw --weight_decay 0.01"
+  "c_e11_adamw_3333_chn --seed 3333 --optimizer adamw --weight_decay 0.01"
+  "c_e3_refine2_1111_chn --seed 1111 --n_layers_refine 2"
+  "c_e3_refine2_2222_chn --seed 2222 --n_layers_refine 2"
+  "c_e3_refine2_3333_chn --seed 3333 --n_layers_refine 2"
+)
+
+# Job D, 2026-08-08 (docs/day6-gpu-push.md §5). Tier 4 capacity: E16 encoder
+# depth, E17 decoder feedforward width, three seeds each -- never at one seed,
+# since both flags shift the global RNG stream for every module constructed
+# after them (the same objection that kept E6 off the candidate list).
+# --max_ckpt_keep back to 2 (the released default) per the runbook's exact
+# command; this batch is scored via test_experiments.sh's auto-selection, not
+# matched-epoch reading like Job A/C.
+EXPERIMENTS=(
+  "e17_dff2048_1111_chn --seed 1111 --dec_d_ff 2048"
+  "e17_dff2048_2222_chn --seed 2222 --dec_d_ff 2048"
+  "e17_dff2048_3333_chn --seed 3333 --dec_d_ff 2048"
+  "e16_depth8_1111_chn --seed 1111 --enc_depth 8"
+  "e16_depth8_2222_chn --seed 2222 --enc_depth 8"
+  "e16_depth8_3333_chn --seed 3333 --enc_depth 8"
+)
+
+EXPERIMENTS_ARCHIVE_TIER3=(
   # ---- Batch A: Tier 3 breadth ------------------------------------------------
 
   # E12, KL weight. kl_beta has always been 0.01 and never tuned. It interacts

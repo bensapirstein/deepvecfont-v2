@@ -35,9 +35,9 @@ if [[ "$MODE" != "sequential" && "$MODE" != "parallel" ]]; then
 fi
 
 # GPU ids to use, in order. Check `nvidia-smi` and set these by hand.
-# Restricted to 2 GPUs as of 2026-08-04 (user directive) -- GPU 3 is off limits
-# going forward, not just for this run.
-GPUS=(1 2)
+# GPU allocation set by Ben 2026-08-08 (docs/day6-gpu-push.md): use 3, 2, 1.
+# GPU 0 stays free.
+GPUS=(3 2 1)
 
 # One entry per experiment: "name_exp  <extra args, if any>". Extra args are
 # needed whenever the candidate's flag changes what modules ModelMain

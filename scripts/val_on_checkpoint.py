@@ -44,14 +44,29 @@ NOTE. The flags that define the *architecture* must match the checkpoint being l
 load_state_dict rather than silently, which is the behaviour we want, but read the
 error as "wrong flags" before reading it as "bad checkpoint".
 """
+import argparse
 import csv
 import os
 import sys
 
-import torch
-
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
+
+# models/transformers.py and models/modality_fusion.py both call
+# get_parser_main_model().parse_args() at MODULE IMPORT TIME, unconditionally,
+# against real sys.argv -- a landmine for any script (this one) that wants to
+# add its own CLI flags before importing ModelMain. Strip our three custom
+# flags out of sys.argv first, so those eager imports only see flags their own
+# parser already knows about; put the values back together as `opts` below,
+# after the imports (and their eager parses) have already succeeded.
+_pre = argparse.ArgumentParser(add_help=False)
+_pre.add_argument('--ckpt_path', required=True)
+_pre.add_argument('--csv_out', default=None)
+_pre.add_argument('--tag', default=None)
+_custom, _rest = _pre.parse_known_args()
+sys.argv = [sys.argv[0]] + _rest
+
+import torch                               # noqa: E402
 
 from dataloader import get_loader          # noqa: E402
 from models.model_main import ModelMain    # noqa: E402
@@ -65,14 +80,10 @@ FIELDS = ['tag', 'ckpt_path', 'language', 'val_metric',
 
 
 def main():
-    parser = get_parser_main_model()
-    parser.add_argument('--ckpt_path', required=True,
-                        help='path to the .ckpt to score; may be any checkpoint, including a released one')
-    parser.add_argument('--csv_out', default=None,
-                        help='append one row here; created with a header if absent')
-    parser.add_argument('--tag', default=None,
-                        help='label for the row, e.g. official_eng_500. Defaults to the checkpoint basename')
-    opts = parser.parse_args()
+    opts = get_parser_main_model().parse_args()
+    opts.ckpt_path = _custom.ckpt_path
+    opts.csv_out = _custom.csv_out
+    opts.tag = _custom.tag
 
     # compute_val_loss reads opts.loss_w_l1 and opts.loss_w_pt_c, and both decoder
     # passes run, so mode must be one the model's forward understands as validation.
