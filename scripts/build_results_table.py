@@ -60,6 +60,44 @@ BATCH = {
     # 600-epoch Chinese seeds, trained 2026-08-06 (PROJECT_PLAN.md §9 item 4).
     "seedfloor600_1111_chn": "baseline-600", "seedfloor600_2222_chn": "baseline-600",
     "seedfloor600_3333_chn": "baseline-600",
+    # Job A, 2026-08-08 (docs/day6-gpu-push.md §1): de-confound E1's epoch
+    # selection. --max_ckpt_keep 10, scored at 100/125/150 for all three.
+    "a_e1_norm_2222_chn": "job-a-deconfound",
+    "a_e1_norm_3333_chn": "job-a-deconfound",
+    "a_seedfloor_3333_chn": "job-a-deconfound",
+    # Job C, 2026-08-08 (docs/day6-gpu-push.md §3): one replicated candidate
+    # per assignment category, three seeds each, matched epoch 150.
+    "c_e2_batchnorm_1111_chn": "job-c-category", "c_e2_batchnorm_2222_chn": "job-c-category",
+    "c_e2_batchnorm_3333_chn": "job-c-category",
+    "c_e4_ngf32_1111_chn": "job-c-category", "c_e4_ngf32_2222_chn": "job-c-category",
+    "c_e4_ngf32_3333_chn": "job-c-category",
+    "c_e5_bneck256_1111_chn": "job-c-category", "c_e5_bneck256_2222_chn": "job-c-category",
+    "c_e5_bneck256_3333_chn": "job-c-category",
+    "c_e7_aux01_1111_chn": "job-c-category", "c_e7_aux01_2222_chn": "job-c-category",
+    "c_e7_aux01_3333_chn": "job-c-category",
+    "c_e11_adamw_1111_chn": "job-c-category", "c_e11_adamw_2222_chn": "job-c-category",
+    "c_e11_adamw_3333_chn": "job-c-category",
+    "c_e3_refine2_1111_chn": "job-c-category", "c_e3_refine2_2222_chn": "job-c-category",
+    "c_e3_refine2_3333_chn": "job-c-category",
+    # Job D, 2026-08-08 (docs/day6-gpu-push.md §5): Tier 4 capacity, three
+    # seeds each, matched epoch 150 (same epoch-selection confound as Job A --
+    # val_metric picked 125 for 5 of 6 runs; scored at matched 150 instead).
+    "e17_dff2048_1111_chn": "job-d-capacity", "e17_dff2048_2222_chn": "job-d-capacity",
+    "e17_dff2048_3333_chn": "job-d-capacity",
+    "e16_depth8_1111_chn": "job-d-capacity", "e16_depth8_2222_chn": "job-d-capacity",
+    "e16_depth8_3333_chn": "job-d-capacity",
+    # Job C-EN, 2026-08-09 (docs/day6-gpu-push.md §4): same category
+    # representatives, one seed, English, screened at n_samples 10 (matching
+    # the paper's own English budget) against eng_seedfloor_1111 rescored at
+    # the same budget. cen_e7_aux01_1111_eng stopped early by Ben's call on
+    # its wandb curve, no results to score.
+    "cen_e2_batchnorm_1111_eng": "job-c-en", "cen_e4_ngf32_1111_eng": "job-c-en",
+    "cen_e5_bneck256_1111_eng": "job-c-en", "cen_e11_adamw_1111_eng": "job-c-en",
+    "cen_e3_refine2_1111_eng": "job-c-en",
+    # cen_e3_refine2_{2222,3333}_eng, 2026-08-10/11: two more seeds for the one
+    # candidate whose 1111 seed cleared the English floor in the degrading
+    # direction, queued to get a 3-seed same-sign-or-not reading (§0).
+    "cen_e3_refine2_2222_eng": "job-c-en", "cen_e3_refine2_3333_eng": "job-c-en",
 }
 
 # Eval budget (--n_samples) each experiment was screened/confirmed at.
