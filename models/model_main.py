@@ -82,7 +82,7 @@ class ModelMain(nn.Module):
             # seq decoding (training or val mode)
             tgt_mask = Variable(subsequent_mask(self.opts.max_seq_len).type_as(ref_pad_mask.data)).unsqueeze(0).expand(z.size(0), -1, -1, -1).cuda().float()
             command_logits, args_logits, attn = self.transformer_seqdec(x=trg_seq_shifted, memory=latent_feat_seq, trg_char=trg_cls, tgt_mask=tgt_mask)
-            command_logits_2, args_logits_2 = self.transformer_seqdec.parallel_decoder(command_logits, args_logits, memory=latent_feat_seq.detach(), trg_char=trg_cls)
+            command_logits_2, args_logits_2 = self.transformer_seqdec.parallel_decoder(command_logits, args_logits, memory=latent_feat_seq.detach(), trg_char=trg_cls, mode=mode)
 
             total_loss = self.transformer_main.loss(command_logits, args_logits,trg_seq, trg_seqlen, trg_pts_aux)
             total_loss_parallel = self.transformer_main.loss(command_logits_2, args_logits_2, trg_seq, trg_seqlen, trg_pts_aux)
@@ -120,7 +120,7 @@ class ModelMain(nn.Module):
             sampled_svg =  sampled_svg[1:]
             cmd2 = sampled_svg[:,:,0].unsqueeze(-1)
             arg2 = sampled_svg[:,:,1:]
-            command_logits_2, args_logits_2 = self.transformer_seqdec.parallel_decoder(cmd_logits=cmd2, args_logits=arg2, memory=latent_feat_seq, trg_char=trg_cls)
+            command_logits_2, args_logits_2 = self.transformer_seqdec.parallel_decoder(cmd_logits=cmd2, args_logits=arg2, memory=latent_feat_seq, trg_char=trg_cls, mode=mode)
             prob_comand = F.softmax(command_logits_2,-1)
             prob_args = F.softmax(args_logits_2,-1)
             update_command = torch.argmax(prob_comand,-1).unsqueeze(-1)

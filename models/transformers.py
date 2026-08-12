@@ -241,14 +241,25 @@ class Transformer_decoder(nn.Module):
         args_logits = args_logits.reshape(N, S, 8, opts.n_args_bins)   # E13
         return cmd_logits,args_logits,attn
     
-    def parallel_decoder(self, cmd_logits, args_logits, memory, trg_char):
-
+    def parallel_decoder(self, cmd_logits, args_logits, memory, trg_char, mode):
+        """`mode` must be the caller's local forward-mode ('train'/'val'/'test'), not
+        the module-level `opts.mode` this used to read. `opts.mode` is a re-parse of
+        the process's CLI args (see the `opts = get_parser_main_model().parse_args()`
+        at the top of this file), so inside train.py it is always 'train' regardless
+        of which branch of ModelMain.forward is calling in. That was invisible as long
+        as the discrete-sampling ('test') branch below was only ever reached from a
+        separate process (test_few_shot.py) launched with --mode test. render_val.py
+        broke that: it calls this in 'test' mode from inside a training run, where the
+        old check took the logits branch on already-argmaxed tokens and corrupted the
+        shapes (found 2026-08-12 via the render-val smoke test, Runtime Error 52 vs 71
+        at the cmd2 * cmd2paddingmask line below).
+        """
         memory = memory.unsqueeze(1)
         cmd_args_mask =  torch.Tensor([[0, 0, 0., 0., 0., 0., 0., 0.],
                                        [1, 1, 0., 0., 0., 0., 1., 1.],
                                        [1, 1, 0., 0., 0., 0., 1., 1.],
-                                       [1, 1, 1., 1., 1., 1., 1., 1.]]).to(cmd_logits.device)  
-        if opts.mode == 'train':
+                                       [1, 1, 1., 1., 1., 1., 1., 1.]]).to(cmd_logits.device)
+        if mode in ('train', 'val'):
             cmd2 = torch.argmax(cmd_logits, -1).unsqueeze(-1).transpose(0, 1) 
             arg2 = torch.argmax(args_logits, -1).transpose(0, 1)
 
