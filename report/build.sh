@@ -9,6 +9,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 python3 "$HERE/make_figures.py"
 python3 "$HERE/make_glyph_figures.py"
+python3 "$HERE/make_model_comparison_figures.py"
 python3 "$HERE/verify_report.py"
 
 cd "$HERE"   # relative figure paths in REPORT.md resolve from here

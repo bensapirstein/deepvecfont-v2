@@ -173,6 +173,21 @@ That single unstated choice is worth 0.0455 on Chinese, against a paper whose en
 over its predecessor is 0.006. It is worth 0.0074 on English. It tracks the dataset rather
 than the model, so it is not a constant anyone can subtract once and forget.
 
+A 0.16 Chinese Error is an average, and an average hides what the tail looks like. The four
+worst glyphs below, out of six freshly-decoded test fonts, were picked by L1 rather than by
+eye.
+
+![Worst Chinese baseline glyphs, ground truth against baseline against E9](figures/fig8_failures.png)
+
+The baseline's failure mode here is consistent: three of these four glyphs, all simple
+rectangular strokes in the ground truth, collapse into a solid filled block rather than an
+outline. E9 does not repeat that pattern on the same four glyphs — it fills one, leaves one
+nearly blank, and draws thin partial outlines on the other two — a different failure, not a
+smaller version of the same one. Neither is the rasterizer floor from the paragraph above
+(both sides of that comparison render the *same* outline; this is the model drawing the wrong
+thing), and it is the kind of error a 64×64 pixel-disagreement count is well suited to
+catching.
+
 **What is still open.** After accounting for the rasterizer, a Chinese-specific gap of about
 0.037 remains, and we do not have an explanation we can prove. The best lead is the
 augmentation shortfall in section 1.1: our Chinese training set is six times augmented where
@@ -320,6 +335,20 @@ metrics and two go against it. Every difference is inside the English floor.
 
 This was written down as a possible outcome before the runs started, so it is a result rather
 than a failed experiment: **the one improvement we found does not survive a change of script.**
+
+What baseline and E9 actually draw, ground truth alongside, same font and same four
+characters on both languages:
+
+![Ground truth against baseline against E9, both languages](figures/fig7_compare.png)
+
+English is close to solved at this scale; Chinese is not, and the two E9 columns are close
+enough to each other that a reader should not expect to see the improvement in section 5.3 by
+eye: 0.0040 L1 is about 16 of the image's 4096 pixels, a difference the metric can pick up
+averaged over hundreds of glyphs but not one a single rendered comparison reliably shows.
+(The L1 figures printed above these panels use the ground-truth outline through our own
+rasterizer, section 3's "svg" convention, over only the six fonts decoded for this figure —
+not the raster-convention, 34-font numbers in sections 3 and 5.1, which they are not meant to
+match.)
 
 ### 5.5 The rest of the sweep
 
