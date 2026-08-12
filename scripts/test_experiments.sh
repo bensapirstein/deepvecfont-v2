@@ -72,6 +72,61 @@ GPUS=(3 2 1)
 #   --weight_decay     no. Same.
 #   --kl_beta          no. Loss weight only.
 EXPERIMENTS=(
+  # REVIEW BATCH, 2026-08-12. Mirrors scripts/run_experiments.sh's EXPERIMENTS
+  # array one for one -- if you edit one, edit both. Runbook: docs/review-response.md.
+  #
+  # Extra args are repeated here for exactly the flags that change what modules
+  # ModelMain constructs; the reasoning per flag is in the block above and has not
+  # changed. --enc_noise_std_train, --loss_w_aux, --optimizer and --weight_decay do
+  # not need repeating; --enc_final_norm, --img_norm, --ngf, --bottleneck_bits and
+  # --n_layers_refine do.
+  "rv_seedfloor_1111_chn"
+  "rv_seedfloor_2222_chn"
+  "rv_seedfloor_3333_chn"
+
+  "rv_e9_sigma050_1111_chn"
+  "rv_e9_sigma050_2222_chn"
+  "rv_e9_sigma050_3333_chn"
+
+  "rv_e1_norm_1111_chn --enc_final_norm True"
+  "rv_e1_norm_2222_chn --enc_final_norm True"
+  "rv_e1_norm_3333_chn --enc_final_norm True"
+
+  "rv_e2_batchnorm_1111_chn --img_norm batch"
+  "rv_e2_batchnorm_2222_chn --img_norm batch"
+  "rv_e2_batchnorm_3333_chn --img_norm batch"
+  "rv_e4_ngf32_1111_chn --ngf 32"
+  "rv_e4_ngf32_2222_chn --ngf 32"
+  "rv_e4_ngf32_3333_chn --ngf 32"
+  "rv_e5_bneck256_1111_chn --bottleneck_bits 256"
+  "rv_e5_bneck256_2222_chn --bottleneck_bits 256"
+  "rv_e5_bneck256_3333_chn --bottleneck_bits 256"
+  "rv_e7_aux01_1111_chn"
+  "rv_e7_aux01_2222_chn"
+  "rv_e7_aux01_3333_chn"
+  "rv_e11_adamw_1111_chn"
+  "rv_e11_adamw_2222_chn"
+  "rv_e11_adamw_3333_chn"
+  "rv_e3_refine2_1111_chn --n_layers_refine 2"
+  "rv_e3_refine2_2222_chn --n_layers_refine 2"
+  "rv_e3_refine2_3333_chn --n_layers_refine 2"
+)
+
+# English arm. Swap in after the Chinese one, together with COMMON_ARGS_ENG.
+EXPERIMENTS_ENG=(
+  "rv_seedfloor_1111_eng"
+  "rv_seedfloor_2222_eng"
+  "rv_seedfloor_3333_eng"
+  "rv_e9_sigma050_1111_eng"
+  "rv_e9_sigma050_2222_eng"
+  "rv_e9_sigma050_3333_eng"
+  "rv_e3_refine2_1111_eng --n_layers_refine 2"
+  "rv_e3_refine2_2222_eng --n_layers_refine 2"
+  "rv_e3_refine2_3333_eng --n_layers_refine 2"
+)
+
+# Tier 3 + Batch B screening array, 2026-08-04, kept verbatim for provenance:
+EXPERIMENTS_ARCHIVE_TIER3=(
   # Re-screened, not re-trained, in the same batch as the candidates. The recorded
   # baseline came from a different screening session, and test_few_shot.py's
   # best-of-n_samples decoding is unseeded, so it moves ~0.001-0.003 between
@@ -122,7 +177,15 @@ EXPERIMENTS=(
 
 # Screening budget per PROJECT_PLAN.md §3.2: n_samples 3, not the n_samples 50
 # confirmation eval.
-COMMON_ARGS="--mode test --model_name main_model --language chn --max_seq_len 71 --batch_size 1 --n_samples 3 --ref_nshot 8 --ref_char_ids 0,1,2,3,26,27,28,29"
+# Confirmation budget, not screening. The review's criticism is about which
+# checkpoint gets scored, so the score itself has to be the one the report quotes:
+# n_samples 50 on Chinese, 34 fonts, raster convention. Screening at n_samples 3
+# would answer a different question more cheaply and no one asked it.
+COMMON_ARGS="--mode test --model_name main_model --language chn --max_seq_len 71 --batch_size 1 --n_samples 50 --ref_nshot 8 --ref_char_ids 0,1,2,3,26,27,28,29"
+
+# English. n_samples 10 is the paper's own Sec. 4.1 English protocol, and running it
+# closes the review's §2 point that every English row in RESULTS.csv used 50.
+COMMON_ARGS_ENG="--mode test --model_name main_model --language eng --max_seq_len 51 --batch_size 1 --n_samples 10 --ref_nshot 4 --ref_char_ids 0,1,26,27 --max_fonts 34"
 
 # entry is "name_exp" or "name_exp <extra args>" -- ${entry#* } leaves entry
 # unchanged (wrong) when there's no space to strip, so check first.
@@ -134,10 +197,18 @@ for entry in "${EXPERIMENTS[@]}"; do
   NAMES+=("$(entry_name "$entry")")
 done
 
+# Which logged column picks each run's checkpoint. Added 2026-08-12.
+#   val_metric     the training-loss proxy every run before that date used
+#   val_render_l1  the rendered Error on the held-out val split, i.e. the quantity
+#                  this script is about to measure on the test split
+# Runs trained with --render_val_freq 0 have no val_render_l1 and best_checkpoint.py
+# will fail loudly rather than quietly reselecting on val_metric. That is the point.
+CRITERION="val_render_l1"
+
 best_ckpt() {
   # Delegates to checkpoint_log.py so selection logic lives in exactly one place,
   # shared with prune_checkpoints() in train.py.
-  python3 scripts/best_checkpoint.py "experiments/$1_main_model"
+  python3 scripts/best_checkpoint.py "experiments/$1_main_model" --criterion "$CRITERION"
 }
 
 declare -A CKPTS
@@ -204,13 +275,19 @@ done
 # PROJECT_PLAN.md / docs/tier1-launch.md §5 report format: per run, L1 minus
 # the baseline's L1, and whether that clears the noise-floor bar. Only
 # meaningful once BASELINE has an L1 -- set to the empty string to skip.
-BASELINE="seedfloor_1111_chn"
+BASELINE="rv_seedfloor_1111_chn"
 
 # The bar a candidate has to clear to be a result rather than seed variance.
 # Was 0.008 for Tier 1's first pass; re-measured to 0.0093 on 2026-08-04 after the
 # val_metric fix changed which checkpoint seed 3333 selects (PROJECT_PLAN.md §3.2).
 # scripts/eval_noise.sh is measuring how much of this is decode noise rather than
 # seed noise; lower it only when that lands, and say so in the plan when you do.
+# PLACEHOLDER. This batch trains on a rebuilt 10x-augmented Chinese dataset with 20
+# base fonts held out, so the 0.0093 floor measured on the 6x data does not transfer.
+# The per-run summary below still prints against this number so the script runs, but
+# NOTHING is read as clearing or not clearing a floor until the three rv_seedfloor
+# seeds are scored and their spread replaces this value. docs/review-response.md §4
+# fixes that order in writing, before the numbers exist.
 NOISE_FLOOR=0.0093
 
 echo
@@ -233,7 +310,7 @@ for name in "${NAMES[@]}"; do
 done
 echo "delta = candidate L1 - $BASELINE L1 (negative = better). clears: candidate beats baseline by more than $NOISE_FLOOR L1."
 
-seed_names=(seedfloor_1111_chn seedfloor_2222_chn seedfloor_3333_chn)
+seed_names=(rv_seedfloor_1111_chn rv_seedfloor_2222_chn rv_seedfloor_3333_chn)
 have_all_seeds=1
 for s in "${seed_names[@]}"; do
   [[ -n "${L1S[$s]:-}" ]] || have_all_seeds=0

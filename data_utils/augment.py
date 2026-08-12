@@ -18,6 +18,22 @@ def render_svg(svg_str, font_dir, char_idx, aug_idx, img_size):
     img_arr = trans2_white_bg(f'{font_dir}/aug_imgs/{str(char_idx)}_{aug_idx}.png')
     return img_arr
 
+# Nine distinct transforms, indices 0-8, so `--n_aug 9` gives the 10x augmentation
+# Sec. 4.1 of the paper describes (the font itself plus nine transformed copies).
+#
+# Indices 0-4 are the released code's five rules, byte for byte, so a dataset built at
+# --n_aug 5 is a strict subset of one built at --n_aug 9 and the two are comparable.
+# Indices 5-8 were added 2026-08-12. Two are the mirrors of rules 0 and 1, one is a
+# milder version of rule 2, and one composes an existing rotation with a shrink, so
+# every added transform stays inside the coordinate range the existing ones already
+# use. Nothing here rotates further than the +/-5 degrees the released rules do.
+#
+# The released code had `else:` as the last branch, so ANY aug_idx >= 4 returned
+# rotate(-5). `--n_aug 9` against that would have written five identical copies of
+# rule 4 and reported itself as 10x augmentation. That is why this raises instead.
+N_AUG_RULES = 9
+
+
 def aug_rules(char_seq, aug_idx):
     if aug_idx == 0:
         return clockwise(affine_shear(char_seq, dx=0.2))['sequence']
@@ -27,8 +43,20 @@ def aug_rules(char_seq, aug_idx):
         return clockwise(affine_scale(char_seq, 0.8))['sequence']
     elif aug_idx == 3:
         return clockwise(affine_rotate(char_seq, theta=5))['sequence']
-    else:
+    elif aug_idx == 4:
         return clockwise(affine_rotate(char_seq, theta=-5))['sequence']
+    elif aug_idx == 5:
+        return clockwise(affine_shear(char_seq, dx=-0.2))['sequence']
+    elif aug_idx == 6:
+        return clockwise(affine_shear(char_seq, dy=0.1))['sequence']
+    elif aug_idx == 7:
+        return clockwise(affine_scale(char_seq, 0.9))['sequence']
+    elif aug_idx == 8:
+        return clockwise(affine_scale(affine_rotate(char_seq, theta=5), 0.9))['sequence']
+    raise ValueError(
+        f"aug_idx {aug_idx} has no rule; aug_rules defines {N_AUG_RULES} (0-{N_AUG_RULES - 1}). "
+        "Add a distinct transform rather than letting an index fall through to a duplicate."
+    )
 
 def copy_others(dir_src, dir_tgt):
     for item in ['class.npy', 'font_id.npy', 'seq_len.npy']:
@@ -95,7 +123,7 @@ def main():
     parser.add_argument("--language", type=str, default='eng', choices=['eng', 'chn'])
     parser.add_argument("--output_path", type=str, default='../data/vecfont_dataset_/', help="Path to write the database to")
     parser.add_argument('--max_len', type=int, default=71, help="by default, 51 for english and 71 for chinese")
-    parser.add_argument('--n_aug', type=int, default=5, help="for each font, augment it for n_aug times")
+    parser.add_argument('--n_aug', type=int, default=5, help="for each font, augment it for n_aug times; the paper's Sec. 4.1 10x Chinese augmentation is --n_aug 9 (font + 9 copies). aug_rules defines 9 distinct transforms; higher values raise")
     parser.add_argument('--n_chars', type=int, default=52)
     parser.add_argument('--img_size', type=int, default=64, help="the height and width of glyph images")
     parser.add_argument("--split", type=str, default='train')

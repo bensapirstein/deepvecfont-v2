@@ -132,4 +132,24 @@ def get_parser_main_model():
     parser.add_argument('--enc_depth', type=int, default=6, help='[E16] depth of the sequence encoder; the released value is 6, and with self_per_cross_attn=2 that is 12 self-attention blocks. 8 gives 16')
     parser.add_argument('--dec_d_ff', type=int, default=1024, help='[E17] feed-forward width of the decoder stack, hardcoded to 1024 upstream against d_model=512 (a 2x expansion where the transformer literature default is 4x). Feeds both the autoregressive decoder and the refinement decoder that produces the scored output')
 
+    # ---- Rendered-metric checkpoint selection. Added 2026-08-12, in answer to the
+    # external review's single highest-priority fix (docs/review-gemini.md 6) and
+    # PROJECT_PLAN.md 8 item 14.
+    #
+    # Every checkpoint in this project was selected on --ckpt_select val_metric, a
+    # weighted sum of training-loss terms none of which IS the scored quantity. Job B
+    # measured that at rho = 0.125 against the rendered Error. These flags let a run
+    # compute the rendered Error itself at every checkpoint, on a held-out split that
+    # is not the test set, and select on that.
+    #
+    # Defaults are off and val_metric, so every command in COMMANDS.md and every
+    # historical run reproduces unchanged. Turning it on is an explicit act.
+    #
+    # --render_val_freq is in EPOCHS and is snapped to a multiple of --freq_ckpt by
+    # train.py: a rendered score on an epoch with no checkpoint cannot select anything.
+    parser.add_argument('--render_val_freq', type=int, default=0, help='[REVIEW] compute the rendered validation metric every N epochs, on the data/vecfont_dataset/<lang>/val split carved out by scripts/make_val_split.py. 0 disables it and reproduces the pre-2026-08-12 behaviour. Rounded up to a multiple of --freq_ckpt')
+    parser.add_argument('--render_val_fonts', type=int, default=0, help='[REVIEW] cap the rendered validation pass to the first N val fonts (the val loader is unshuffled, so N is a stable subset). 0 = all of them')
+    parser.add_argument('--render_val_samples', type=int, default=1, help="[REVIEW] candidates decoded per glyph during rendered validation. 1 measures a single decode; >1 mirrors test_few_shot.py's best-of-N selection by IoU against the image decoder's own output. Cost is linear in this, and the test protocol's N=50 is unaffordable at every checkpoint")
+    parser.add_argument('--ckpt_select', type=str, default='val_metric', choices=['val_metric', 'val_render_l1', 'val_render_siou'], help='[REVIEW] which logged column ranks checkpoints, for both prune_checkpoints and scripts/best_checkpoint.py. val_render_* require --render_val_freq > 0; a run that selects on a column it never logged is a configuration error, not a fallback')
+
     return parser

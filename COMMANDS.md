@@ -160,3 +160,76 @@ git add RESULTS.csv && git commit -m "update RESULTS.csv" && git push
 New experiment directories are picked up automatically. If the script warns
 `not in BATCH map, tagged 'unclassified'`, add the new `name_exp` to the `BATCH`
 dict (and `N_SAMPLES`/`NOTES` if relevant) at the top of the script.
+
+## Rendered-metric checkpoint selection (added 2026-08-12)
+
+Full runbook: `docs/review-response.md`. The short version, for when you know what you
+are doing and just need the flags.
+
+Everything below is opt-in. `--render_val_freq 0` and `--ckpt_select val_metric` are the
+defaults, so every command above this section reproduces exactly as it did before.
+
+**Carve the held-out split first.** `train.py` validates on the *test* split, so without
+this there is no set to select on that is not the set being scored.
+
+```
+python scripts/make_val_split.py --language chn --n_val 20          # dry run
+python scripts/make_val_split.py --language chn --n_val 20 --apply
+```
+
+**Train with the rendered pass on.** `--render_val_freq` is in epochs and is snapped up
+to a multiple of `--freq_ckpt`; a rendered score on an epoch with no checkpoint selects
+nothing.
+
+```
+CUDA_VISIBLE_DEVICES=<gpu> python train.py --mode train --name_exp <name> \
+  --model_name main_model --language chn --max_seq_len 71 --ref_nshot 8 \
+  --ref_char_ids 0,1,2,3,26,27,28,29 --batch_size 32 \
+  --seed <seed> --n_epochs 151 --freq_ckpt 25 --max_ckpt_keep 10 \
+  --render_val_freq 25 --render_val_fonts 0 --render_val_samples 1 \
+  --ckpt_select val_render_l1
+```
+
+`--ref_char_ids` is required on a *training* command once `--render_val_freq` is on: the
+rendered pass runs at `mode='test'`, which reads its references from that flag and
+asserts there are `--ref_nshot` of them. English uses the default `0,1,26,27`, Chinese
+needs the eight above. `train.py` refuses to start rather than failing at the first
+checkpoint.
+
+`--render_val_fonts 0` means all of them; `--render_val_samples 1` is one decode per
+glyph, not the test protocol's best-of-50, which is unaffordable at every checkpoint.
+
+**Select and score.**
+
+```
+python scripts/best_checkpoint.py experiments/<name>_main_model --criterion val_render_l1
+```
+
+Runs trained with `--render_val_freq 0` have no such column and this fails loudly rather
+than falling back to `val_metric`. That is deliberate: a silent fallback would hide the
+difference the flag exists to measure.
+
+**Compare the two selection rules, no GPU.** Needs `--max_ckpt_keep` large enough that
+the checkpoints are still on disk.
+
+```
+python scripts/selection_disagreement.py --csv_out selection_audit.csv \
+  --floor 0.0093 experiments/rv_*_chn_main_model
+```
+
+**Rebuild the Chinese dataset at the paper's 10× augmentation.** `--n_aug 9` is the font
+plus nine transformed copies. Run the val split *before* this, never after.
+
+```
+cd data_utils
+python augment.py --language chn --split train --n_aug 9 --max_len 71 --n_chars 52 \
+  --img_size 64 --output_path ../data/vecfont_dataset
+python relax_rep.py --language chn --split train --max_len 71 --n_chars 52 \
+  --output_path ../data/vecfont_dataset
+python relax_rep.py --language chn --split val --max_len 71 --n_chars 52 \
+  --output_path ../data/vecfont_dataset
+```
+
+`augment.py` writes `sequence.npy` and `rendered_64.npy`; the dataloader reads
+`sequence_relaxed.npy` and `pts_aux.npy`. Skipping `relax_rep.py` trains on stale
+sequences without any error.

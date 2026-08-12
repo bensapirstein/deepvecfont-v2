@@ -717,6 +717,127 @@ def check_tier4_wiring():
         check("tier 4 defaults are importable", False, repr(exc))
 
 
+def check_render_val_wiring():
+    """The rendered-metric selection path, added 2026-08-12 for the review response.
+
+    This section guards the one failure mode that would waste the whole batch
+    silently: a run launched with --ckpt_select val_render_l1 that never actually
+    computes a rendered score, prunes on a column of blanks, and returns a table of
+    numbers selected by nothing at all. Every check here is cheap and static; the
+    live one that matters (does the val split exist) belongs on the cluster and is
+    step 2 of docs/review-response.md.
+    """
+    print("\n10. rendered-metric validation and selection [static + live defaults]")
+
+    with open(os.path.join(REPO, 'scripts', 'run_experiments.sh')) as fh:
+        run_src = fh.read()
+    with open(os.path.join(REPO, 'train.py')) as fh:
+        train_src = fh.read()
+    with open(os.path.join(REPO, 'render_val.py')) as fh:
+        rv_src = fh.read()
+    with open(os.path.join(REPO, 'checkpoint_log.py')) as fh:
+        cl_src = fh.read()
+
+    # --- the module itself
+    check("render_val.py compiles", _compiles(os.path.join(REPO, 'render_val.py')))
+    check("render_val reads the refinement decoder, not the autoregressive one",
+          "sampled_2" in rv_src and "sampled_1" not in rv_src)
+    check("render_val binarizes at the same threshold as eval_reconstruction_error",
+          "IOU_THRESH = 255 * 3 / 4" in rv_src)
+    check("render_val restores training mode after scoring",
+          "was_training" in rv_src and "model_main.train()" in rv_src)
+
+    # --- the manifest
+    check("checkpoint_log logs val_render_l1", "'val_render_l1'" in cl_src)
+    check("checkpoint_log knows which direction each criterion improves in",
+          "CRITERIA_LOWER" in cl_src and "CRITERIA_HIGHER" in cl_src)
+    check("checkpoint_log.rank drops blank values instead of defaulting them",
+          "if not raw:" in cl_src and "continue" in cl_src)
+
+    # --- train.py
+    check("train.py builds a loader on the 'val' split, not 'test'",
+          "1, 'val')" in train_src)
+    check("train.py refuses --ckpt_select val_render_* without --render_val_freq",
+          "needs --render_val_freq > 0" in train_src)
+    check("train.py refuses to start if the val split is missing",
+          "make_val_split.py" in train_src)
+    check("train.py snaps render_val_freq to a multiple of freq_ckpt",
+          "snapped to" in train_src)
+    check("prune_checkpoints ranks on the selected criterion",
+          "criterion=opts.ckpt_select" in train_src)
+    check("the rendered pass does NOT swap the EMA in a second time",
+          "do NOT swap in again here" in train_src)
+    check("train.py checks ref_char_ids against ref_nshot before epoch 1",
+          "n_ref_ids != opts.ref_nshot" in train_src)
+    check("the Chinese training batch passes the 8 Chinese ref_char_ids",
+          "--ref_nshot 8 --ref_char_ids 0,1,2,3,26,27,28,29" in run_src)
+    check("the English training batch passes the 4 English ref_char_ids",
+          "--ref_nshot 4 --ref_char_ids 0,1,26,27" in run_src)
+
+    # --- augmentation, the other half of the batch
+    with open(os.path.join(REPO, 'data_utils', 'augment.py')) as fh:
+        aug_src = fh.read()
+    check("aug_rules defines nine distinct transforms (10x augmentation)",
+          "N_AUG_RULES = 9" in aug_src)
+    check("aug_rules raises on an unknown index instead of duplicating rule 4",
+          "raise ValueError" in aug_src and "else:\n        return clockwise(affine_rotate(char_seq, theta=-5))" not in aug_src)
+
+    # --- defaults still reproduce every earlier run
+    try:
+        from options import get_parser_main_model
+        defaults = get_parser_main_model().parse_args([])
+        check("--render_val_freq defaults to 0 (off)", defaults.render_val_freq == 0,
+              f"got {defaults.render_val_freq}")
+        check("--ckpt_select defaults to val_metric", defaults.ckpt_select == 'val_metric',
+              f"got {defaults.ckpt_select}")
+        check("--render_val_samples defaults to 1", defaults.render_val_samples == 1,
+              f"got {defaults.render_val_samples}")
+    except Exception as exc:  # pragma: no cover
+        check("render-val defaults are importable", False, repr(exc))
+
+    # --- the two batch arrays must not drift apart
+    with open(os.path.join(REPO, 'scripts', 'test_experiments.sh')) as fh:
+        test_src = fh.read()
+    train_names = _array_names(run_src, 'EXPERIMENTS')
+    test_names = _array_names(test_src, 'EXPERIMENTS')
+    check("run_experiments and test_experiments name the same runs, in the same order",
+          train_names == test_names,
+          f"train-only {sorted(set(train_names) - set(test_names))}, "
+          f"test-only {sorted(set(test_names) - set(train_names))}")
+    check("the test batch selects on val_render_l1",
+          'CRITERION="val_render_l1"' in test_src)
+    check("the test batch scores at the confirmation budget, not screening",
+          "--n_samples 50" in test_src)
+
+
+def _compiles(path):
+    try:
+        py_compile.compile(path, doraise=True, cfile=tempfile.mktemp())
+        return True
+    except Exception:
+        return False
+
+
+def _array_names(src, var):
+    """The first field of every entry in a bash array literal named `var`.
+
+    Reads the LAST assignment of that name, because that is the one bash would use.
+    A file with two live `EXPERIMENTS=` blocks launches the second, which is how the
+    wrong batch gets run; this checker should see what bash sees.
+    """
+    marker = f"\n{var}=("
+    if marker not in src:
+        return []
+    body = src.rsplit(marker, 1)[1].split("\n)", 1)[0]
+    names = []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line.startswith('"'):
+            continue
+        names.append(line.strip('"').split()[0])
+    return names
+
+
 def main():
     print("Pre-flight infrastructure checks -- " + REPO)
     check_options()
@@ -728,6 +849,7 @@ def main():
     check_tier2_wiring()
     check_tier3_wiring()
     check_tier4_wiring()
+    check_render_val_wiring()
 
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed")
     if FAILED:

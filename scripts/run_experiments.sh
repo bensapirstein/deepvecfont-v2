@@ -58,7 +58,10 @@ GPUS=(3 2 1)
 #
 # Run A then B in one go: leave both blocks uncommented and launch parallel. To
 # stop after A, comment out the Batch B block.
-EXPERIMENTS=(
+# Renamed 2026-08-12: this was a second live `EXPERIMENTS=` assignment that the
+# review batch below silently overrode (bash takes the last one). Closed job, kept
+# for provenance, no longer able to be launched by accident.
+EXPERIMENTS_ARCHIVE_JOBA=(
   # Job A, 2026-08-08 (docs/day6-gpu-push.md §1). Retrains of E1's two
   # degrading legs plus one matched baseline, all with every checkpoint kept
   # (--max_ckpt_keep 10 below), so E1 can be read at matched epoch 150 against
@@ -71,7 +74,7 @@ EXPERIMENTS=(
   "a_seedfloor_3333_chn --seed 3333"
 )
 
-EXPERIMENTS_ARCHIVE_JOB_A="${EXPERIMENTS[*]}"
+EXPERIMENTS_ARCHIVE_JOB_A="${EXPERIMENTS_ARCHIVE_JOBA[*]}"
 EXPERIMENTS_ARCHIVE_JOB_C=(
   "c_e2_batchnorm_1111_chn --seed 1111 --img_norm batch"
   "c_e2_batchnorm_2222_chn --seed 2222 --img_norm batch"
@@ -93,14 +96,106 @@ EXPERIMENTS_ARCHIVE_JOB_C=(
   "c_e3_refine2_3333_chn --seed 3333 --n_layers_refine 2"
 )
 
-# Job D, 2026-08-08 (docs/day6-gpu-push.md §5). Tier 4 capacity: E16 encoder
-# depth, E17 decoder feedforward width, three seeds each -- never at one seed,
-# since both flags shift the global RNG stream for every module constructed
-# after them (the same objection that kept E6 off the candidate list).
-# --max_ckpt_keep back to 2 (the released default) per the runbook's exact
-# command; this batch is scored via test_experiments.sh's auto-selection, not
-# matched-epoch reading like Job A/C.
+# ===========================================================================
+# REVIEW BATCH, staged 2026-08-12. docs/review-response.md is the runbook and
+# reads this array; PROJECT_PLAN.md §8 item 14 is the scope decision.
+#
+# What is different about this batch, and it is not a small difference:
+#
+#   1. It trains on a REBUILT Chinese dataset -- 10x augmentation (--n_aug 9)
+#      per the paper's Sec. 4.1, against the 6x every earlier run used, and with
+#      20 base fonts carved out into a held-out val split. Nothing here is
+#      comparable to any row in RESULTS.csv from before this date. Every
+#      comparison in this batch is internal to this batch: candidates against
+#      THESE three baseline seeds, at a floor re-measured from THESE three.
+#
+#   2. Checkpoints are selected on --ckpt_select val_render_l1, the rendered
+#      Error on the held-out val fonts, not on val_metric. That is the review's
+#      single highest-priority fix. See render_val.py.
+#
+#   3. --max_ckpt_keep 10 keeps every checkpoint a 151-epoch run produces at
+#      --freq_ckpt 25, so both selections can be compared after the fact by
+#      scripts/selection_disagreement.py without retraining anything. Check
+#      `df -h /data/bens` before launching: 27 runs x 6 checkpoints is the
+#      largest single batch this project has held on disk at once.
+#
+# 27 runs, ~1 GPU-h each plus the rendered validation pass, three GPUs, so
+# roughly 12 hours of wall clock in waves of three.
 EXPERIMENTS=(
+  # --- the three baseline seeds. Everything else is read against their mean,
+  # and the seed floor is re-measured from their spread before any candidate is
+  # looked at. §3.2's rule, unchanged.
+  "rv_seedfloor_1111_chn --seed 1111"
+  "rv_seedfloor_2222_chn --seed 2222"
+  "rv_seedfloor_3333_chn --seed 3333"
+
+  # --- E9, the finalist the review says does not clear its own floor. This is
+  # the run that decides whether it survives honest checkpointing. The reading
+  # rule is pre-committed in docs/review-response.md §4 and does not move after
+  # the numbers land.
+  "rv_e9_sigma050_1111_chn --seed 1111 --enc_noise_std_train 0.5"
+  "rv_e9_sigma050_2222_chn --seed 2222 --enc_noise_std_train 0.5"
+  "rv_e9_sigma050_3333_chn --seed 3333 --enc_noise_std_train 0.5"
+
+  # --- E1, the project's one confirmed degrading effect, and the only one that
+  # ever cleared a floor. Job A already de-confounded it for epoch; this asks
+  # whether it survives selection too. A degrading result that evaporates under
+  # correct checkpointing is as much a finding as one that holds.
+  "rv_e1_norm_1111_chn --seed 1111 --enc_final_norm True"
+  "rv_e1_norm_2222_chn --seed 2222 --enc_final_norm True"
+  "rv_e1_norm_3333_chn --seed 3333 --enc_final_norm True"
+
+  # --- the six assignment-category representatives from Job C. All six read
+  # null on Chinese under val_metric selection. Re-run here because "null under
+  # a defective selection rule" is not the same claim as "null", and the
+  # coverage table in REPORT §5 rests on all six.
+  "rv_e2_batchnorm_1111_chn --seed 1111 --img_norm batch"
+  "rv_e2_batchnorm_2222_chn --seed 2222 --img_norm batch"
+  "rv_e2_batchnorm_3333_chn --seed 3333 --img_norm batch"
+  "rv_e4_ngf32_1111_chn --seed 1111 --ngf 32"
+  "rv_e4_ngf32_2222_chn --seed 2222 --ngf 32"
+  "rv_e4_ngf32_3333_chn --seed 3333 --ngf 32"
+  "rv_e5_bneck256_1111_chn --seed 1111 --bottleneck_bits 256"
+  "rv_e5_bneck256_2222_chn --seed 2222 --bottleneck_bits 256"
+  "rv_e5_bneck256_3333_chn --seed 3333 --bottleneck_bits 256"
+  "rv_e7_aux01_1111_chn --seed 1111 --loss_w_aux 0.1"
+  "rv_e7_aux01_2222_chn --seed 2222 --loss_w_aux 0.1"
+  "rv_e7_aux01_3333_chn --seed 3333 --loss_w_aux 0.1"
+  "rv_e11_adamw_1111_chn --seed 1111 --optimizer adamw --weight_decay 0.01"
+  "rv_e11_adamw_2222_chn --seed 2222 --optimizer adamw --weight_decay 0.01"
+  "rv_e11_adamw_3333_chn --seed 3333 --optimizer adamw --weight_decay 0.01"
+  "rv_e3_refine2_1111_chn --seed 1111 --n_layers_refine 2"
+  "rv_e3_refine2_2222_chn --seed 2222 --n_layers_refine 2"
+  "rv_e3_refine2_3333_chn --seed 3333 --n_layers_refine 2"
+)
+
+# English arm of the same batch. Swap this in after the Chinese one finishes,
+# and swap COMMON_ARGS for COMMON_ARGS_ENG below at the same time. Nine runs at
+# ~17.5 GPU-h each is ~53 h of wall clock on three GPUs -- start it before a
+# weekend, not before a deadline.
+#
+# Three candidates rather than eight, because English costs 17x what Chinese
+# costs per run and the two arms disagree: E9 is the finalist (mixed sign on
+# English under the old protocol), E3_refine2 is the one candidate confirmed
+# degrading on English at three seeds, and the baselines are the yardstick.
+EXPERIMENTS_ENG=(
+  "rv_seedfloor_1111_eng --seed 1111"
+  "rv_seedfloor_2222_eng --seed 2222"
+  "rv_seedfloor_3333_eng --seed 3333"
+  "rv_e9_sigma050_1111_eng --seed 1111 --enc_noise_std_train 0.5"
+  "rv_e9_sigma050_2222_eng --seed 2222 --enc_noise_std_train 0.5"
+  "rv_e9_sigma050_3333_eng --seed 3333 --enc_noise_std_train 0.5"
+  "rv_e3_refine2_1111_eng --seed 1111 --n_layers_refine 2"
+  "rv_e3_refine2_2222_eng --seed 2222 --n_layers_refine 2"
+  "rv_e3_refine2_3333_eng --seed 3333 --n_layers_refine 2"
+)
+
+EXPERIMENTS_ARCHIVE_JOBD=(
+  # Job D, 2026-08-08 (docs/day6-gpu-push.md §5). Tier 4 capacity: E16 encoder
+  # depth, E17 decoder feedforward width, three seeds each -- never at one seed,
+  # since both flags shift the global RNG stream for every module constructed
+  # after them (the same objection that kept E6 off the candidate list).
+  # Closed 2026-08-08: both null, mixed sign on both metrics.
   "e17_dff2048_1111_chn --seed 1111 --dec_d_ff 2048"
   "e17_dff2048_2222_chn --seed 2222 --dec_d_ff 2048"
   "e17_dff2048_3333_chn --seed 3333 --dec_d_ff 2048"
@@ -263,8 +358,31 @@ EXPERIMENTS_ARCHIVE_TIER3=(
 #   "e1_norm_chn --seed 1111 --enc_final_norm True"
 
 # Args shared by every experiment in this batch. Identical across all of them,
-# which is what makes every row comparable to seedfloor_1111_chn.
-COMMON_ARGS="--mode train --model_name main_model --language chn --max_seq_len 71 --ref_nshot 8 --batch_size 32 --n_epochs 151 --freq_ckpt 25 --max_ckpt_keep 2"
+# which is what makes every row comparable to the batch's own baseline seeds.
+#
+# --render_val_freq 25 matches --freq_ckpt, so every checkpoint carries a rendered
+# score and selection never has to fall back. --render_val_samples 1 is one decode
+# per glyph: the test protocol's best-of-50 at every checkpoint is unaffordable, and
+# a single decode is still the same decoder, rasterizer and binary masks as the
+# reported number, which val_metric never was.
+#
+# --max_ckpt_keep 10 keeps all six checkpoints of a 151-epoch run, so
+# scripts/selection_disagreement.py can compare the two selection rules after the
+# fact. Prune after scoring, not before.
+# --ref_char_ids is new to a TRAINING command and is not optional here. The rendered
+# pass runs the model at mode='test', which reads its reference glyphs from this flag
+# and asserts there are exactly --ref_nshot of them. The default is the English set of
+# four; a Chinese run at --ref_nshot 8 dies at the first checkpoint without it. These
+# are the same eight ids every Chinese test run in COMMANDS.md uses, so the validation
+# decode is conditioned exactly as the scored decode will be.
+COMMON_ARGS="--mode train --model_name main_model --language chn --max_seq_len 71 --ref_nshot 8 --ref_char_ids 0,1,2,3,26,27,28,29 --batch_size 32 --n_epochs 151 --freq_ckpt 25 --max_ckpt_keep 10 --render_val_freq 25 --render_val_samples 1 --ckpt_select val_render_l1"
+
+# English. 631 epochs is the budget frozen 2026-08-07 in docs/english-arm.md Step 1
+# (E_conv per seed 400/580/420, rounded up), kept unchanged so this batch differs
+# from the English arm in selection rule alone. --freq_ckpt 20 gives 31 checkpoints;
+# --render_val_freq 40 scores every other one, because English decodes are slower and
+# the curve is flat enough by then that 16 scored points locate the minimum.
+COMMON_ARGS_ENG="--mode train --model_name main_model --language eng --max_seq_len 51 --ref_nshot 4 --ref_char_ids 0,1,26,27 --batch_size 32 --n_epochs 631 --freq_ckpt 20 --max_ckpt_keep 10 --render_val_freq 40 --render_val_samples 1 --ckpt_select val_render_l1"
 
 # Appends the launched PID to the global `pids` array. Must be called directly
 # (not via `$(launch_one ...)`) -- command substitution forks a subshell, and a

@@ -10,6 +10,7 @@ from torch.optim import Adam, AdamW
 from torchvision.utils import save_image
 from tensorboardX import SummaryWriter
 from dataloader import get_loader
+import render_val
 from models import util_funcs
 from models.model_main import ModelMain
 from options import get_parser_main_model
@@ -103,9 +104,18 @@ def compute_val_loss(model_main, val_loader, opts):
                         + loss_val['svg']['total'] + loss_val['svg_para']['total'])
     return loss_val, val_metric
 
-def prune_checkpoints(dir_ckpt, dir_log, latest_path, max_keep):
-    """Keep the max_keep checkpoints with the lowest logged val_metric, plus latest_path."""
-    ranked = sorted(checkpoint_log.read_all(dir_log), key=lambda r: float(r['val_metric']))
+def prune_checkpoints(dir_ckpt, dir_log, latest_path, max_keep, criterion='val_metric'):
+    """Keep the max_keep best checkpoints on `criterion`, plus latest_path.
+
+    `criterion` defaults to val_metric, which is what every run before 2026-08-12 used.
+    Under --ckpt_select val_render_l1 the ranking is the rendered Error on the held-out
+    val split instead, so pruning keeps the checkpoints that actually score well rather
+    than the ones a training-loss proxy likes. checkpoint_log.rank drops rows with no
+    value for the criterion, so a checkpoint saved on an epoch where the rendered pass
+    did not run is prunable unless it is the latest -- set --render_val_freq equal to
+    --freq_ckpt when that matters.
+    """
+    ranked = checkpoint_log.rank(checkpoint_log.read_all(dir_log), criterion)
     keep = {latest_path}
     keep.update(os.path.join(dir_ckpt, r['checkpoint']) for r in ranked[:max_keep])
 
@@ -126,7 +136,52 @@ def train_main_model(opts):
     logfile_val = open(os.path.join(dir_log, "val_loss_log.txt"), 'a' if opts.resume else 'w')
 
     train_loader = get_loader(opts.data_root, opts.img_size, opts.language, opts.char_num, opts.max_seq_len, opts.dim_seq, opts.batch_size, opts.mode)
+    # NOTE, and it is not a small one: this is the TEST split. The released code has
+    # always validated here, so `val_metric` and everything selected by it were computed
+    # on the fonts the report scores. Left as-is so historical runs reproduce, and
+    # answered by render_val_loader below rather than by moving this line.
     val_loader = get_loader(opts.data_root, opts.img_size, opts.language, opts.char_num, opts.max_seq_len, opts.dim_seq, opts.batch_size_val, 'test')
+
+    # Rendered-metric validation, on a split that is genuinely held out. See render_val.py.
+    render_val_loader = None
+    render_val_freq = 0
+    if opts.render_val_freq > 0:
+        # Snap up to a multiple of freq_ckpt: a rendered score computed on an epoch with
+        # no checkpoint selects nothing and costs the same as one that does.
+        render_val_freq = max(opts.freq_ckpt,
+                              -(-opts.render_val_freq // opts.freq_ckpt) * opts.freq_ckpt)
+        if render_val_freq != opts.render_val_freq:
+            print(f"--render_val_freq {opts.render_val_freq} snapped to {render_val_freq} "
+                  f"(a multiple of --freq_ckpt {opts.freq_ckpt})")
+        split_dir = os.path.join(opts.data_root, opts.language, 'val')
+        if not os.path.isdir(split_dir):
+            raise FileNotFoundError(
+                f"--render_val_freq is set but {split_dir} does not exist. "
+                f"Carve it first: python scripts/make_val_split.py --language {opts.language} --apply"
+            )
+        # The rendered pass runs the model at mode='test', which takes its reference
+        # glyphs from --ref_char_ids rather than drawing them at random, and asserts
+        # len(ref_char_ids) == ref_nshot inside ModelMain.forward. Training runs never
+        # pass --ref_char_ids, so the default '0,1,26,27' (4 ids) meets a Chinese
+        # --ref_nshot 8 and the run dies at the first checkpoint, an hour in, with a
+        # bare AssertionError. Catch it here, before the first epoch.
+        n_ref_ids = len([x for x in opts.ref_char_ids.split(',') if x.strip()])
+        if n_ref_ids != opts.ref_nshot:
+            raise ValueError(
+                f"--render_val_freq needs --ref_char_ids to hold exactly --ref_nshot "
+                f"({opts.ref_nshot}) ids; got {n_ref_ids} ({opts.ref_char_ids!r}). "
+                f"Chinese wants --ref_char_ids 0,1,2,3,26,27,28,29, English the default "
+                f"0,1,26,27. Use the same ids the test run will use, or the validation "
+                f"decode is conditioned on different references than the score."
+            )
+        render_val_loader = get_loader(opts.data_root, opts.img_size, opts.language,
+                                       opts.char_num, opts.max_seq_len, opts.dim_seq,
+                                       1, 'val')
+    if opts.ckpt_select.startswith('val_render') and render_val_loader is None:
+        raise ValueError(
+            f"--ckpt_select {opts.ckpt_select} needs --render_val_freq > 0; otherwise the "
+            f"column it selects on is never written."
+        )
 
     model_main = ModelMain(opts)
 
@@ -331,15 +386,38 @@ def train_main_model(opts):
                 torch.save({'model':model_main.module.state_dict(), 'opt':optimizer.state_dict(), 'n_epoch':epoch, 'n_iter':batches_done}, ckpt_path)
             else:
                 torch.save({'model':model_main.state_dict(), 'opt':optimizer.state_dict(), 'n_epoch':epoch, 'n_iter':batches_done}, ckpt_path)
+            # Still inside the EMA swap_in above -- do NOT swap in again here. EMA.swap_in
+            # overwrites self.backup, so a second call would back up the shadow weights
+            # and the following swap_out would restore those instead of the raw ones,
+            # silently turning the run into a permanently-averaged model. Scoring on the
+            # EMA weights is what we want anyway: they are the weights just saved.
+            render = None
+            if render_val_loader is not None and epoch % render_val_freq == 0:
+                render = render_val.rendered_val_metrics(
+                    model_main, render_val_loader, opts,
+                    n_samples=opts.render_val_samples,
+                    max_fonts=opts.render_val_fonts)
+                print(f"Epoch {epoch}: rendered val L1 {render['l1']:.6f}, "
+                      f"s-IoU {render['siou']:.6f}, "
+                      f"renderability {render['renderability']:.4f} "
+                      f"({render['n_glyphs']} glyphs)")
+
             if ema is not None: ema.swap_out(model_main)
 
-            checkpoint_log.append(dir_log, epoch, batches_done, ckpt_name, last_val_metric, loss_val)
+            checkpoint_log.append(dir_log, epoch, batches_done, ckpt_name, last_val_metric,
+                                  loss_val, render=render)
 
             if use_wandb:
-                wandb.log({'CKPT/val_metric': last_val_metric, 'CKPT/epoch': epoch}, step=batches_done)
+                ckpt_log = {'CKPT/val_metric': last_val_metric, 'CKPT/epoch': epoch}
+                if render is not None:
+                    ckpt_log['CKPT/val_render_l1'] = render['l1']
+                    ckpt_log['CKPT/val_render_siou'] = render['siou']
+                    ckpt_log['CKPT/val_render_renderability'] = render['renderability']
+                wandb.log(ckpt_log, step=batches_done)
 
             if opts.max_ckpt_keep > 0:
-                prune_checkpoints(dir_ckpt, dir_log, ckpt_path, opts.max_ckpt_keep)
+                prune_checkpoints(dir_ckpt, dir_log, ckpt_path, opts.max_ckpt_keep,
+                                  criterion=opts.ckpt_select)
 
     logfile_train.close()
     logfile_val.close()
