@@ -2,23 +2,29 @@
 
 Usage:  python report/make_model_comparison_figures.py
 Writes: report/figures/fig7_compare.png
-        report/figures/fig8_failures.png
+        report/figures/fig8_best.png
+        report/figures/fig9_failures.png
 
 Reads report/assets/model_output_renders.npz, which holds real rasters of real
-model output -- the same font 0000 / char 10,20,30,40 selection and the same
-worst-L1 Chinese glyphs docs/pull-figure-assets.md's reading rule commits to
-before anything is drawn (see render_model_output.py for how the npz was made).
-Nothing here re-renders an SVG or picks a glyph; it only lays out arrays that
-already exist. No cairosvg dependency, so this runs anywhere numpy does.
+model output -- the same font 0000 / char 10,20,30,40 selection, the same
+best-L1 and worst-L1 Chinese glyphs docs/pull-figure-assets.md's reading rule
+commits to before anything is drawn (see render_model_output.py for how the
+npz was made). Nothing here re-renders an SVG or picks a glyph; it only lays
+out arrays that already exist. No cairosvg dependency, so this runs anywhere
+numpy does.
 
 Reading rule, from docs/pull-figure-assets.md, applied here:
   1. Fonts/characters were chosen before any glyph was looked at (font 0000,
      chars 10/20/30/40 -- see render_model_output.py).
   2. Where E9 looks better in fig7, that is one case, not evidence: section 5.3
      of REPORT.md already finds E9's Chinese mean does not clear its floor.
-  3. fig8 is the failure strip this rule requires: real worst-case Chinese
-     glyphs, chosen by L1, not by eye.
+  3. fig9 is the failure strip this rule requires: real worst-case Chinese
+     glyphs, chosen by L1, not by eye. fig8 is its mirror at the other tail,
+     chosen the same way, so the report does not show only one side of the
+     distribution.
   4. Chinese and English get equal space in fig7.
+  5. fig7 appears before fig8 and fig9 in REPORT.md: the qualitative baseline
+     comparison comes first, then what the distribution's two tails look like.
 """
 import csv
 import os
@@ -106,8 +112,40 @@ def compare():
     fig.savefig(os.path.join(OUT, "fig7_compare.png")); plt.close(fig)
 
 
-# ======================================================= figure 8, failures
-def failures():
+# ============================================ figure 8, best (good performance)
+def best():
+    meta = D["meta_best"]  # (font_idx, char_idx, l1) rows, best first
+    n = len(meta)
+    fig, axes = plt.subplots(3, n, figsize=(1.7 * n, 4.6))
+    fig.subplots_adjust(hspace=.30, wspace=.10)
+
+    for col, (font_idx, ci, l1) in enumerate(meta):
+        ci = int(ci)
+        gt = D[f"best_{font_idx}_{ci}_gt"]
+        bl = D[f"best_{font_idx}_{ci}_baseline"]
+        e9 = D[f"best_{font_idx}_{ci}_e9"]
+        show(axes[0, col], gt, title=f"font {font_idx}, glyph #{ci}\nL1 = {float(l1):.3f}")
+        show(axes[1, col], bl)
+        show(axes[2, col], e9)
+
+    for r, name in enumerate(["ground truth", "baseline (this L1)", "+ E9"]):
+        axes[r, 0].set_ylabel(name, fontsize=7.6, color=INK)
+
+    fig.suptitle("Best Chinese baseline glyphs by L1, out of the 6 decoded test fonts "
+                 "(chosen by the number, not by eye)", fontsize=9, color=INK, y=1.01)
+    fig.text(.5, -.04,
+             "The other tail of the same distribution as the failure strip below: these are "
+             "what the low end of a 0.163 Chinese mean looks like, picked by the identical "
+             "rule -- lowest L1 among the same six decoded fonts, not the most flattering "
+             "glyphs found by scanning. Simple strokes with little overlap area reconstruct "
+             "close to the ground truth; the failure strip shows what the model does with "
+             "denser, more overlapping strokes instead.",
+             ha="center", fontsize=7.4, color=GREY, wrap=True)
+    fig.savefig(os.path.join(OUT, "fig8_best.png")); plt.close(fig)
+
+
+# ======================================================= figure 9, failures
+def worst():
     meta = D["meta_failures"]  # (font_idx, char_idx, l1) rows, worst first
     n = len(meta)
     fig, axes = plt.subplots(3, n, figsize=(1.7 * n, 4.6))
@@ -133,10 +171,11 @@ def failures():
              "point that the metric is floor-dominated on Chinese (0.142 of any score is "
              "cross-rasterizer disagreement, not model error) applies here too.",
              ha="center", fontsize=7.4, color=GREY, wrap=True)
-    fig.savefig(os.path.join(OUT, "fig8_failures.png")); plt.close(fig)
+    fig.savefig(os.path.join(OUT, "fig9_failures.png")); plt.close(fig)
 
 
 if __name__ == "__main__":
     compare()
-    failures()
-    print("wrote fig7_compare.png, fig8_failures.png")
+    best()
+    worst()
+    print("wrote fig7_compare.png, fig8_best.png, fig9_failures.png")

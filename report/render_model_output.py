@@ -1,4 +1,4 @@
-"""Rasterize the glyphs the two model-comparison figures need, cluster-side.
+"""Rasterize the glyphs the model-comparison figures need, cluster-side.
 
 Usage (cluster only, needs cairosvg):  python report/render_model_output.py
 Writes: report/assets/model_output_renders.npz
@@ -46,10 +46,12 @@ CHAR_NUM = 52
 COMPARE_FONT = "0000"
 COMPARE_CHARS = [10, 20, 30, 40]
 
-# The "failures" figure: the worst-L1 Chinese baseline glyphs, per
-# report/assets/model_output_l1.csv (rank_failures.py) -- a number choosing the
-# examples, not a person scanning for the ugliest ones.
-N_FAILURES = 4
+# The "best"/"failures" figures: the lowest- and highest-L1 Chinese baseline
+# glyphs, per report/assets/model_output_l1.csv (rank_failures.py) -- a number
+# choosing the examples at both tails, not a person scanning for the flattering
+# or the ugliest ones. Added 2026-08-12 alongside the worst-only strip so the
+# report shows both ends of the same distribution rather than only the bad one.
+N_TAIL = 4
 
 
 def load_pair(lang, model, font_idx):
@@ -64,19 +66,43 @@ def load_pair(lang, model, font_idx):
     return svgs[:CHAR_NUM], svgs[CHAR_NUM:]
 
 
-def worst_chn_baseline_glyphs(n):
+def _chn_baseline_rows():
     import csv
     csv_path = os.path.join(HERE, "assets", "model_output_l1.csv")
-    rows = [r for r in csv.DictReader(open(csv_path))
+    return [r for r in csv.DictReader(open(csv_path))
             if r["lang"] == "chn" and r["model"] == "baseline"]
-    rows.sort(key=lambda r: -float(r["l1"]))
+
+
+def worst_chn_baseline_glyphs(n):
+    rows = _chn_baseline_rows()
+    rows.sort(key=lambda r: (-float(r["l1"]), r["font_idx"], int(r["char_idx"])))
     return [(r["font_idx"], int(r["char_idx"]), float(r["l1"])) for r in rows[:n]]
+
+
+def best_chn_baseline_glyphs(n):
+    rows = _chn_baseline_rows()
+    rows.sort(key=lambda r: (float(r["l1"]), r["font_idx"], int(r["char_idx"])))
+    return [(r["font_idx"], int(r["char_idx"]), float(r["l1"])) for r in rows[:n]]
+
+
+def _render_tail(out, tag, glyphs, pairs_by_font):
+    meta = []
+    for font_idx, ci, l1 in glyphs:
+        for model in ("baseline", "e9"):
+            if (font_idx, model) not in pairs_by_font:
+                pairs_by_font[(font_idx, model)] = load_pair("chn", model, font_idx)
+            synth_svgs, gt_svgs = pairs_by_font[(font_idx, model)]
+            out[f"{tag}_{font_idx}_{ci}_{model}"] = render_svg_mask(synth_svgs[ci], RES)
+        out[f"{tag}_{font_idx}_{ci}_gt"] = render_svg_mask(
+            pairs_by_font[(font_idx, "baseline")][1][ci], RES)
+        meta.append((font_idx, ci, l1))
+        print(f"{tag}: font {font_idx} char {ci}, baseline L1={l1:.4f}")
+    return meta
 
 
 def main():
     out = {}
     meta_compare = []
-    meta_failures = []
 
     # -- compare figure: font 0000, both languages, both models, fixed chars --
     for lang in ("chn", "eng"):
@@ -90,23 +116,14 @@ def main():
         meta_compare.append((lang, COMPARE_FONT, COMPARE_CHARS))
         print(f"compare: {lang} font {COMPARE_FONT}, chars {COMPARE_CHARS}")
 
-    # -- failures figure: worst Chinese baseline glyphs, baseline + E9 + GT ------
-    worst = worst_chn_baseline_glyphs(N_FAILURES)
+    # -- best/failures figures: both tails of Chinese baseline L1, + E9 + GT ---
     pairs_by_font = {}
-    for font_idx, ci, l1 in worst:
-        for model in ("baseline", "e9"):
-            if (font_idx, model) not in pairs_by_font:
-                pairs_by_font[(font_idx, model)] = load_pair("chn", model, font_idx)
-            synth_svgs, gt_svgs = pairs_by_font[(font_idx, model)]
-            key_model = f"fail_{font_idx}_{ci}_{model}"
-            out[key_model] = render_svg_mask(synth_svgs[ci], RES)
-        out[f"fail_{font_idx}_{ci}_gt"] = render_svg_mask(
-            pairs_by_font[(font_idx, "baseline")][1][ci], RES)
-        meta_failures.append((font_idx, ci, l1))
-        print(f"failure: font {font_idx} char {ci}, baseline L1={l1:.4f}")
+    meta_best = _render_tail(out, "best", best_chn_baseline_glyphs(N_TAIL), pairs_by_font)
+    meta_failures = _render_tail(out, "fail", worst_chn_baseline_glyphs(N_TAIL), pairs_by_font)
 
     out["meta_compare_chars"] = np.array(COMPARE_CHARS)
     out["meta_compare_font"] = np.array(COMPARE_FONT)
+    out["meta_best"] = np.array(meta_best, dtype=object)
     out["meta_failures"] = np.array(meta_failures, dtype=object)
 
     np.savez_compressed(OUT, **out)

@@ -115,3 +115,7 @@ ipython_config.py
 #                                      make_model_comparison_figures.py needs
 #                                      nothing beyond numpy on the Mac
 #   report/REPORT.pdf                 the deliverable itself
+
+# Staging area for removal. This sandbox cannot delete files on the Mac, so anything
+# retired gets moved here and Ben removes the folder himself. Never tracked.
+_to_delete/

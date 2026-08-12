@@ -89,17 +89,31 @@ without meaning to.
 2. **If a figure shows a case where E9 looks better, it is captioned as one case, not as
    evidence.** Section 5.3 already says E9's Chinese mean does not clear its floor, and a
    picture cannot upgrade that.
-3. **Show a failure too.** The honest version of this figure includes at least one glyph where
-   both models are visibly wrong, and Chinese at 0.16 L1 will not be short of candidates.
+3. **Show both tails, not just the failure.** The honest version of this figure includes at
+   least one glyph where both models are visibly wrong, and Chinese at 0.16 L1 will not be
+   short of candidates. It also includes the low-L1 end of the same distribution, picked by the
+   identical rule (lowest/highest L1 among the six decoded fonts), so the report is not shown
+   only from its worst angle. Added 2026-08-12: the first pass through this doc built only the
+   failure strip; a "good performance" strip was missing and readers reasonably flagged it.
 4. **English and Chinese get equal space.** The report's own finding is that they disagree, so
    a figure showing only the language that behaves better would misrepresent it.
+5. **The qualitative comparison appears before either tail strip in `REPORT.md`.** Readers see
+   what baseline-versus-E9 looks like on an unselected glyph first, then what the distribution's
+   two extremes look like, in that order — not the other way around.
 
 ## What gets built from it
 
-Two figures, both from `report/make_glyph_figures.py` once the assets are present:
+Three figures, all from `report/make_model_comparison_figures.py` (not
+`make_glyph_figures.py`, which builds figures 1–2 from the dataset's own outlines) once the
+assets are present. `report/render_model_output.py` does the cairosvg rasterization,
+cluster-side, and writes the npz all three read:
 
-- **Ground truth against baseline against E9**, same font, same characters, both languages.
-  This is the qualitative companion to the table in section 5.1.
-- **A failure strip**: the glyphs where reconstruction error is worst, which is the fastest way
-  to show what an L1 of 0.16 on Chinese actually looks like, and why the metric being
-  floor-dominated (section 3) matters.
+- **fig7, ground truth against baseline against E9**, same font, same characters, both
+  languages. This is the qualitative companion to the table in section 5.1, and appears first.
+- **fig8, a "best" strip**: the four lowest-L1 Chinese baseline glyphs among the six decoded
+  fonts, chosen by `report/render_model_output.py`'s `best_chn_baseline_glyphs()`. Shows what a
+  0.163 Chinese mean looks like at its good end — mostly glyphs with little stroke overlap to
+  begin with, which reconstruct close to the ground truth.
+- **fig9, the failure strip**: `worst_chn_baseline_glyphs()`, the mirror selection at the other
+  tail. The fastest way to show what an L1 of 0.16 on Chinese actually looks like, and why the
+  metric being floor-dominated (section 3) matters.

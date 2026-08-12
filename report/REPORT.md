@@ -173,20 +173,9 @@ That single unstated choice is worth 0.0455 on Chinese, against a paper whose en
 over its predecessor is 0.006. It is worth 0.0074 on English. It tracks the dataset rather
 than the model, so it is not a constant anyone can subtract once and forget.
 
-A 0.16 Chinese Error is an average, and an average hides what the tail looks like. The four
-worst glyphs below, out of six freshly-decoded test fonts, were picked by L1 rather than by
-eye.
-
-![Worst Chinese baseline glyphs, ground truth against baseline against E9](figures/fig8_failures.png)
-
-The baseline's failure mode here is consistent: three of these four glyphs, all simple
-rectangular strokes in the ground truth, collapse into a solid filled block rather than an
-outline. E9 does not repeat that pattern on the same four glyphs — it fills one, leaves one
-nearly blank, and draws thin partial outlines on the other two — a different failure, not a
-smaller version of the same one. Neither is the rasterizer floor from the paragraph above
-(both sides of that comparison render the *same* outline; this is the model drawing the wrong
-thing), and it is the kind of error a 64×64 pixel-disagreement count is well suited to
-catching.
+A 0.16 Chinese Error is an average, and an average hides what the tail looks like. Section 5.4
+shows both tails from the same six freshly-decoded test fonts, picked by L1 rather than by eye,
+alongside the qualitative baseline-versus-E9 comparison they belong next to.
 
 **What is still open.** After accounting for the rasterizer, a Chinese-specific gap of about
 0.037 remains, and we do not have an explanation we can prove. The best lead is the
@@ -349,6 +338,27 @@ averaged over hundreds of glyphs but not one a single rendered comparison reliab
 rasterizer, section 3's "svg" convention, over only the six fonts decoded for this figure —
 not the raster-convention, 34-font numbers in sections 3 and 5.1, which they are not meant to
 match.)
+
+The same six decoded Chinese fonts also bound the distribution behind that 0.163 mean. Section
+3 said an average hides the tail; here is both ends of it, picked by L1 and not by eye, same
+models as above. First the low end:
+
+![Best Chinese baseline glyphs, ground truth against baseline against E9](figures/fig8_best.png)
+
+Then the high end:
+
+![Worst Chinese baseline glyphs, ground truth against baseline against E9](figures/fig9_failures.png)
+
+The pattern at the bad end is consistent: three of these four glyphs, all simple rectangular
+strokes in the ground truth, collapse into a solid filled block rather than an outline. E9 does
+not repeat that pattern on the same four glyphs — it fills one, leaves one nearly blank, and
+draws thin partial outlines on the other two — a different failure, not a smaller version of
+the same one. At the good end the pattern is close to the mirror image: what survives is glyphs
+with little stroke overlap to begin with, single bars and simple crosses, which is a property of
+the glyph rather than something either model did well. Neither tail is the rasterizer floor from
+section 3 (every comparison above renders the *same* outline on both sides; this is the model
+drawing the right or wrong thing), and the spread between them is the kind of thing a 64×64
+pixel-disagreement count is well suited to catching.
 
 ### 5.5 The rest of the sweep
 
