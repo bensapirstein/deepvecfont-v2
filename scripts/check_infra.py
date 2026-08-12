@@ -809,6 +809,36 @@ def check_render_val_wiring():
     check("the test batch scores at the confirmation budget, not screening",
           "--n_samples 50" in test_src)
 
+    # render_val_freq snaps UP to a multiple of freq_ckpt, so if the two differ, the
+    # checkpoints in between carry no rendered score and prune_checkpoints -- ranking on
+    # a column they leave blank -- deletes them at the next save. Selection stays
+    # correct; the selection audit does not, because val_metric's argmin is then only
+    # searched over the scored subset. Simulated 2026-08-12: 30 checkpoints -> 11.
+    for lang, args in (('chn', 'COMMON_ARGS='), ('eng', 'COMMON_ARGS_ENG=')):
+        line = next((l for l in run_src.splitlines() if l.startswith(args)), '')
+        freqs = {}
+        toks = line.split()
+        for i, t in enumerate(toks):
+            if t in ('--freq_ckpt', '--render_val_freq') and i + 1 < len(toks):
+                freqs[t] = toks[i + 1].rstrip('"')
+        check(f"{lang}: --freq_ckpt and --render_val_freq match, so every kept "
+              f"checkpoint carries both columns",
+              freqs.get('--freq_ckpt') == freqs.get('--render_val_freq') and freqs,
+              f"got {freqs}")
+
+    check("best_checkpoint_file walks the ranking instead of only testing its first row",
+          "for row in ranked:" in cl_src)
+
+    # The one live test of render_val's arithmetic that runs without a GPU: stubs for
+    # torch, cairosvg and svg_utils, hand-computable masks. If this fails, the rendered
+    # numbers the whole batch selects on are wrong and nothing downstream is worth
+    # running. See scripts/test_render_val.py.
+    import subprocess
+    r = subprocess.run([sys.executable, os.path.join(REPO, 'scripts', 'test_render_val.py')],
+                       capture_output=True, text=True)
+    check("render_val self-test passes (masks, L1, s-IoU, best-of-N, renderability)",
+          r.returncode == 0, (r.stdout + r.stderr).strip().splitlines()[-1] if (r.stdout or r.stderr) else '')
+
 
 def _compiles(path):
     try:

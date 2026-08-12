@@ -67,10 +67,15 @@ cd ~/deepvecfont-v2
 git pull origin repro
 conda activate dvf_v2
 
-python scripts/check_infra.py          # expect 220 passed, 0 failed
+python scripts/check_infra.py          # expect 224 passed, 0 failed
 df -h /data/bens && du -sh /data/bens/deepvecfont-v2/*
 nvidia-smi
 ```
+
+Check 10 now ends by running `scripts/test_render_val.py`, which drives
+`rendered_val_metrics` against stubbed torch, cairosvg and `svg_utils` with
+hand-computable masks. It is the only test of the rendered arithmetic that needs no GPU,
+and it is the one to run first if a number later looks wrong.
 
 Disk is the one that can bite. This batch keeps every checkpoint of 27 Chinese runs
 (`--max_ckpt_keep 10` against six checkpoints per run), which is the largest thing this
@@ -324,7 +329,16 @@ Only after the Chinese arm has been read and §4.5's gate has not fired. Nine ru
 
 Swap `EXPERIMENTS` for `EXPERIMENTS_ENG` and `COMMON_ARGS` for `COMMON_ARGS_ENG` in both
 scripts (both arrays are already written, sitting directly below the Chinese ones), then
-the same launch and score. The English scoring pass runs at `--n_samples 10`, which is
+the same launch and score.
+
+`COMMON_ARGS_ENG` uses `--freq_ckpt 40`, not the English arm's 20, and that is
+deliberate. `--render_val_freq` snaps to a multiple of `--freq_ckpt`, so at 20/40 half
+the checkpoints would carry no rendered score, and `prune_checkpoints` — ranking on a
+column those rows leave blank — deletes every one of them at the next save (simulated
+2026-08-12: 30 checkpoints down to 11, no odd multiple surviving). Selection stays
+correct either way; the §8 audit does not, because `val_metric`'s argmin would then be
+searched over only the scored half. `check_infra.py` now fails if the two cadences drift
+apart again. The English scoring pass runs at `--n_samples 10`, which is
 the paper's own Sec. 4.1 English protocol and closes the review's §2 point in the same
 motion.
 

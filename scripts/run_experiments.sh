@@ -379,10 +379,18 @@ COMMON_ARGS="--mode train --model_name main_model --language chn --max_seq_len 7
 
 # English. 631 epochs is the budget frozen 2026-08-07 in docs/english-arm.md Step 1
 # (E_conv per seed 400/580/420, rounded up), kept unchanged so this batch differs
-# from the English arm in selection rule alone. --freq_ckpt 20 gives 31 checkpoints;
-# --render_val_freq 40 scores every other one, because English decodes are slower and
-# the curve is flat enough by then that 16 scored points locate the minimum.
-COMMON_ARGS_ENG="--mode train --model_name main_model --language eng --max_seq_len 51 --ref_nshot 4 --ref_char_ids 0,1,26,27 --batch_size 32 --n_epochs 631 --freq_ckpt 20 --max_ckpt_keep 10 --render_val_freq 40 --render_val_samples 1 --ckpt_select val_render_l1"
+# from the English arm in selection rule alone.
+#
+# --freq_ckpt 40, not the English arm's 20, and the reason is the audit rather than
+# the cost. render_val_freq snaps to a multiple of freq_ckpt, so at 20/40 half the
+# checkpoints would carry no rendered score -- and prune_checkpoints, ranking on a
+# column those rows leave blank, deletes every one of them at the next save
+# (simulated: 30 checkpoints -> 11, none of the odd multiples surviving). Selection
+# itself stays correct, but scripts/selection_disagreement.py would then compare
+# val_metric's argmin over only the half that happened to be scored, which is not the
+# comparison the review asked for. Matching the two cadences keeps both columns on
+# every surviving checkpoint. 15 checkpoints per run, --max_ckpt_keep 10.
+COMMON_ARGS_ENG="--mode train --model_name main_model --language eng --max_seq_len 51 --ref_nshot 4 --ref_char_ids 0,1,26,27 --batch_size 32 --n_epochs 631 --freq_ckpt 40 --max_ckpt_keep 10 --render_val_freq 40 --render_val_samples 1 --ckpt_select val_render_l1"
 
 # Appends the launched PID to the global `pids` array. Must be called directly
 # (not via `$(launch_one ...)`) -- command substitution forks a subshell, and a

@@ -130,11 +130,23 @@ def best_checkpoint_file(exp_dir, criterion='val_metric'):
     dir_log = os.path.join(exp_dir, 'logs')
     dir_ckpt = os.path.join(exp_dir, 'checkpoints')
 
-    row = best_row(dir_log, criterion)
-    if row is not None and os.path.exists(os.path.join(dir_ckpt, row['checkpoint'])):
-        return row['checkpoint']
+    # Walk the ranking rather than testing only its first row. The manifest is
+    # append-only and outlives pruning, so the best-scoring checkpoint may well have
+    # been deleted -- pruning under one criterion, then selecting under another, is
+    # exactly how that happens. Returning the best SURVIVING checkpoint is the right
+    # answer; giving up because the very best one is gone is not.
+    ranked = rank(read_all(dir_log), criterion)
+    for row in ranked:
+        if os.path.exists(os.path.join(dir_ckpt, row['checkpoint'])):
+            return row['checkpoint']
 
     if criterion != 'val_metric':
+        if ranked:
+            raise FileNotFoundError(
+                f"{len(ranked)} checkpoints in {dir_log} carry a {criterion} value but "
+                f"none of them is still on disk in {dir_ckpt}. The run was pruned under a "
+                f"different criterion, or --max_ckpt_keep was too small."
+            )
         raise FileNotFoundError(
             f"no checkpoint in {dir_log} carries a {criterion} value. Either the run was "
             f"trained with --render_val_freq 0, or its rendered-validation pass never ran. "
