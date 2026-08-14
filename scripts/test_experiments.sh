@@ -318,7 +318,7 @@ done
 if [[ "$have_all_seeds" == 1 ]]; then
   echo
   echo "=== Seed-noise floor (screening metric spread) ==="
-  python3 - "${L1S[seedfloor_1111_chn]}" "${L1S[seedfloor_2222_chn]}" "${L1S[seedfloor_3333_chn]}" <<'EOF'
+  python3 - "${L1S[rv_seedfloor_1111_chn]}" "${L1S[rv_seedfloor_2222_chn]}" "${L1S[rv_seedfloor_3333_chn]}" <<'EOF'
 import sys
 vals = [float(v) for v in sys.argv[1:]]
 print(f"L1 per seed: {vals}")

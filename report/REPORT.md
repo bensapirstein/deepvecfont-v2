@@ -25,9 +25,13 @@ distance to the published figure comes from the evaluation, not from our trainin
 Before changing anything we trained the baseline three times with different random seeds and
 measured how far apart the results landed. That spread is 0.0097. All 26 candidate
 configurations together span 0.0101. Changing the architecture moved the metric about as much
-as changing the seed. One change improves Chinese at every seed on both metrics, adding noise
-to the encoder during training. It does not carry over to English. One change reliably makes
-things worse. The rest are indistinguishable from noise.
+as changing the seed. One change — adding noise to the encoder during training — has the same
+sign at every seed on both Chinese metrics, but both deltas sit inside the pre-registered noise
+floor (section 5.3); we report it as a direction, not a gain. One change reliably makes things
+worse. The rest are indistinguishable from noise. An external review of an earlier draft
+challenged the noise-floor reading and the checkpoint-selection criterion; section 5.6 answers
+both with a rebuilt dataset and rendered-metric checkpoint selection, and reaches the same null
+reading on every candidate, this time from a floor that came back 63% wider.
 
 ---
 
@@ -138,7 +142,7 @@ carrying.
 All numbers below are over the same 34 test fonts, best-of-50 decoding, with the ground truth
 taken from the dataset's pre-rendered images.
 
-| | Error (L1) ↓ | s-IoU ↑ | SSIM ↑ |
+| | Error (L1), lower is better | s-IoU, higher is better | SSIM, higher is better |
 |---|---|---|---|
 | Paper, Chinese | 0.080 | not reported | not reported |
 | Released weights, Chinese, epoch 600 | 0.1629 | 0.3225 | 0.4373 |
@@ -147,7 +151,7 @@ taken from the dataset's pre-rendered images.
 | Released weights, English, epoch 600 | 0.0658 | 0.7029 | 0.7181 |
 | **Our reconstruction, English**, 3-seed mean, 630 epochs | **0.0597** | 0.7309 | 0.7374 |
 
-![Paper, released weights, our reconstruction and our improved model](figures/fig3_threeway.png)
+![Paper, released weights, our reconstruction and E9](figures/fig3_threeway.png)
 
 We did not reach the published numbers. We did reproduce the released model, and those are
 different claims.
@@ -189,7 +193,7 @@ roughly that much.
 
 ---
 
-## 4. Improved architecture
+## 4. The sweep
 
 ### 4.1 What we did first, and why
 
@@ -235,9 +239,11 @@ All seven categories in the brief are covered, and one representative of each wa
 three seeds. That last part is the point: a coverage table built from single runs would show
 breadth and prove nothing, for the reason section 5.2 gives.
 
-### 4.3 The main change: encoder noise
+### 4.3 The training-dynamics candidate: encoder noise
 
-**E9 sets the training-time encoder noise to σ = 0.5, half the released value.**
+**E9 sets the training-time encoder noise to σ = 0.5, half the released value.** It changes
+when noise is added, not the architecture it is added to, so we read it and report it as a
+training-dynamics intervention rather than an architectural change.
 
 The reason is in section 1.1. The code adds `x + torch.randn_like(x)` to the encoder output on
 every forward pass. The paper describes this perturbation as an inference-time device that
@@ -264,17 +270,21 @@ afterwards, which would make it partly an initialization change.
 
 ### 5.1 The comparison table
 
-| | Paper | Released weights | Our reconstruction | **Our improved model (E9)** |
+| | Paper | Released weights | Our reconstruction (mean ± sd) | E9, σ=0.5 (mean ± sd)† |
 |---|---|---|---|---|
-| **Chinese**, Error (L1) ↓ | 0.080 | 0.1629 | 0.1621 | **0.1581** |
-| **Chinese**, s-IoU ↑ | — | 0.3225 | 0.2681 | **0.2952** |
-| **Chinese**, SSIM ↑ | — | 0.4373 | 0.4425 | **0.4479** |
-| **English**, Error (L1) ↓ | 0.052 | 0.0658 | 0.0597 | 0.0601 |
-| **English**, s-IoU ↑ | — | 0.7029 | 0.7309 | 0.7305 |
-| **English**, SSIM ↑ | — | 0.7181 | 0.7374 | 0.7358 |
+| **Chinese**, Error (L1), lower is better | 0.080 | 0.1629 | 0.1621 ± 0.0047 | 0.1581 ± 0.0046 |
+| **Chinese**, s-IoU, higher is better | — | 0.3225 | 0.2681 ± 0.0122 | 0.2952 ± 0.0191 |
+| **Chinese**, SSIM, higher is better | — | 0.4373 | 0.4425 ± 0.0057 | 0.4479 ± 0.0094 |
+| **English**, Error (L1), lower is better | 0.052 | 0.0658 | 0.0597 ± 0.0021 | 0.0601 ± 0.0007 |
+| **English**, s-IoU, higher is better | — | 0.7029 | 0.7309 ± 0.0065 | 0.7305 ± 0.0041 |
+| **English**, SSIM, higher is better | — | 0.7181 | 0.7374 ± 0.0076 | 0.7358 ± 0.0005 |
 
-Our columns are three-seed means. E9 improves all three Chinese metrics. It does not change
-English.
+Our columns are three-seed means ± sample standard deviation. †E9's Chinese deltas have the
+same sign at all three seeds on every metric (section 5.3), but sit inside the pre-registered
+noise floor on both L1 and s-IoU — a direction, not a demonstrated gain, and not an improved
+model. It does not change English (section 5.4). Section 5.6 re-reads E9 and every other
+candidate under a corrected, wider floor and rendered-metric checkpoint selection, and reaches
+the same null conclusion.
 
 ### 5.2 What the sweep returned
 
@@ -314,6 +324,11 @@ So E9 is a consistent direction, not a demonstrated gain of a stated size. We re
 way. A narrower floor is available from the higher sampling budget, 0.0236, and E9 would clear
 that one, but the bar was set at 0.0315 before anything ran and moving it afterwards would
 throw away the only thing that makes the sweep worth reading.
+
+Section 5.6 puts this reading to a harder test: a real held-out validation split, checkpoint
+selection on the rendered metric instead of the proxy criticized in section 6.3, and a Chinese
+training set rebuilt to the paper's stated 10× augmentation. The floor measured there is wider,
+not narrower, and E9 does not clear it either.
 
 ### 5.4 It does not transfer to English
 
@@ -393,6 +408,76 @@ mixed-sign and null on Chinese, and on English it clears both floors in the degr
 direction at all three seeds. Latent 256 (E5) does the same. The same one-factor edit points
 in opposite directions on the two scripts the paper reports.
 
+### 5.6 Re-reading under rendered-metric selection and a corrected dataset
+
+An external review of an earlier draft raised three critical issues: E9 promoted as the
+improved model on a delta inside its own floor (sections 5.1 and 5.3); checkpoint selection
+run on `val_metric`, which section 6.3 already measures at Spearman ρ = 0.125 against the
+rendered metric; and a Chinese training set built at 6× augmentation against the paper's
+stated 10×. This section answers all three together with one batch, because they turned out to
+share a root cause: fixing checkpoint selection required a real held-out validation split, and
+building that split was the natural place to also fix the augmentation.
+
+Two things had to be true before a single candidate could be re-read. First, `train.py`
+validates on the test split (`get_loader(..., 'test')`), so scoring `val_metric`'s own
+candidate checkpoints on a rendered metric computed the same way would be oracle selection, not
+a fix — we carved a held-out split of 20 Chinese base fonts out of train instead, decoded and
+rasterized it at every checkpoint, and selected checkpoints on that. Second, the Chinese
+training set was rebuilt at the paper's 10× augmentation (the released `aug_rules` silently
+duplicated one transform past index 4, which we also fixed). Twenty-seven runs — three baseline
+seeds plus E9, E1, and one representative of each remaining category, three seeds each — were
+trained on the rebuilt data, selected on the rendered L1, and scored on the untouched 34-font
+test split at `n_samples 50`, the same protocol as section 5.1.
+
+**The re-measured Chinese L1 floor is 0.0151** (three baseline seeds: 0.1534, 0.1560, 0.1685),
+against 0.0093 before — 63% wider. A floor this much wider was written down in advance as a
+stop condition: a rebuilt dataset and a fixed selection criterion should sharpen the instrument,
+not blunt it, and a wider floor means the batch cannot resolve anything smaller than it could
+before. **No candidate clears it.** E9 and E1 are not even same-sign across seeds on L1; the
+three that agree in sign (E2, E3, E4) stay inside it.
+
+| Change | Mean ΔL1 | Mean Δs-IoU | Reading (L1, the pre-committed metric) |
+|---|---|---|---|
+| Encoder noise σ=0.5 (E9) | +0.0064 | −0.0052 | mixed sign |
+| Terminal LayerNorm (E1) | +0.0021 | −0.0310 | mixed sign |
+| Batch norm in the image branch (E2) | −0.0068 | +0.0357 | same sign, under floor |
+| Encoder width (E4) | +0.0048 | −0.0039 | same sign, under floor |
+| Latent 256 (E5) | +0.0014 | +0.0031 | mixed sign |
+| Bézier weight 0.1 (E7) | +0.0027 | −0.0048 | mixed sign |
+| AdamW (E11) | +0.0014 | +0.0000 | mixed sign |
+| Refinement depth 2 (E3) | +0.0061 | −0.0137 | same sign, under floor |
+
+Deltas are against `rv_seedfloor_1111_chn`, matching the batch's own generated output; nothing
+here is comparable to section 5.5's table — different training set, different training-set
+size, different selection rule. We report the corrected floor as the finding, keep sections 5.1
+through 5.5 as the substantive results with the selection-criterion caveat section 6.3 already
+states, and did not run the English arm: the reading rule committed to this before training,
+on the grounds that a wider floor means less can be resolved, not more, and hardware sitting
+idle is not a reason to look for a result the floor says isn't there.
+
+**One disclosure, deliberately not promoted to a result.** The s-IoU floor moved the other way,
+0.0223 against 0.0315 before — narrower, not wider. Read on its own terms, E1 clears it with the
+same sign at all three seeds (mean −0.0310), the same candidate and direction as section 5.5's
+one confirmed degrading result, and E2 clears it as well (mean +0.0357), improving, which was
+null before. Both stay null on L1. We record this rather than act on it: the reading rule this
+section opened with gates on the L1 spread specifically, decided before any candidate is read,
+and reaching for a second metric that still clears after the first has closed the batch is the
+same move this review's own section 4.1 objected to in E9's original sign-agreement argument.
+If this pattern is worth reading, it needs its own pre-committed gate on the s-IoU floor,
+decided before training, not after.
+
+**The review's second question — whether mismatched checkpoint selection could explain the
+0.0101 spread across the 26 pre-review candidates — has a direct answer, at no extra
+training cost.** Every run in this batch kept all six checkpoints, each carrying both the old
+selection criterion and the rendered one, so which checkpoint each would have picked is already
+on disk. They disagree on 21 of 27 runs. Where they disagree, the checkpoint `val_metric` would
+have picked costs a mean of 0.0186 rendered L1 against the one the rendered metric picks — above
+the re-measured floor on 20 of the 27 runs. **Checkpoint selection was not a minor confound on
+the pre-review sweep; on this evidence it was the dominant source of the spread being measured.**
+This does not overturn any individual pre-review row on its own — none was re-scored under the
+new criterion — but it is the strongest single piece of evidence this project has produced for
+the review's own reading of section 6.3, and section 6.3's caveat is restated with it.
+
 ---
 
 ## 6. Discussion
@@ -464,19 +549,31 @@ Human judgement failed the same way. Two English runs were read from their train
 was stopped early on the shape of its curve and has no result. The other was read as going well
 and came back as our confirmed degrading result.
 
-We did not switch the whole project to rendered-metric selection. Doing it properly means
-decoding and rasterizing the validation set at every checkpoint, and it would invalidate all
-113 scored rows with four days left. We report it as measured and name the fix below.
+We did not switch the whole project to rendered-metric selection at the time this measurement
+was made. Doing it properly means decoding and rasterizing the validation set at every
+checkpoint, and it would have invalidated all 113 scored rows with four days left. We reported
+it as measured and named the fix below — done afterward, in response to external review;
+section 5.6 has the result.
 
 ### 6.4 Limitations
 
 Every floor here rests on three seeds, so the bars themselves are uncertain; our Chinese s-IoU
-floor moved from 0.0401 to 0.0315 when we re-measured it. Checkpoint selection stayed on the
-criterion we just described as defective. English was scored on 34 fonts rather than the full
+floor moved from 0.0401 to 0.0315 when we re-measured it, and section 5.6's later batch moves
+both floors again — L1 wider to 0.0151, s-IoU narrower to 0.0223 — on a different training set
+and selection rule, which is itself the clearest evidence that three seeds pin these numbers
+down loosely. Checkpoint selection stayed on the criterion we just described as defective for
+every result in sections 5.1–5.5; section 5.6 fixes it, at the cost of every number in that
+section being unreadable against the ones before it. English was scored on 34 fonts rather than
+the full
 1,386, with the resulting bias measured at 0.0074 rather than assumed, and at 50 samples per
 glyph rather than the paper's 10. Nothing was run at more than three seeds.
 
 ### 6.5 What we would do next
+
+**Both items below were done, in response to external review; section 5.6 has the results.**
+Rebuilding the dataset and fixing selection made the Chinese floor wider, not narrower, so
+neither closes the 0.037 residual in section 3 — that lead is still open, and now looks less
+likely to be closed by more seeds at the current sampling budget alone.
 
 Rebuild the Chinese training set at the paper's stated ten-times augmentation and retrain. It
 is cheap, about an hour per run, and it is the only open lead on the 0.037 in section 3.

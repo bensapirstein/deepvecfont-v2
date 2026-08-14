@@ -98,6 +98,33 @@ BATCH = {
     # candidate whose 1111 seed cleared the English floor in the degrading
     # direction, queued to get a 3-seed same-sign-or-not reading (§0).
     "cen_e3_refine2_2222_eng": "job-c-en", "cen_e3_refine2_3333_eng": "job-c-en",
+    # rv-review, 2026-08-12/13 (docs/review-response.md): answers the external
+    # review, docs/review-gemini.md. Rebuilt Chinese dataset at 10x augmentation
+    # (was 6x), a real held-out val split (20 base fonts, never trained on or
+    # scored), and checkpoint selection on the rendered metric instead of
+    # val_metric. NOT comparable to any batch above: different training set,
+    # different training-set size, different selection rule. The re-measured
+    # floor (0.0151) came back 63% above the pre-review 0.0093, §4.5's gate
+    # fired, and no candidate here clears it -- reported as a null/instrument
+    # finding, not a result. Do not read these rows against tier1-3/job-c deltas.
+    "rv_seedfloor_1111_chn": "rv-review", "rv_seedfloor_2222_chn": "rv-review",
+    "rv_seedfloor_3333_chn": "rv-review",
+    "rv_e9_sigma050_1111_chn": "rv-review", "rv_e9_sigma050_2222_chn": "rv-review",
+    "rv_e9_sigma050_3333_chn": "rv-review",
+    "rv_e1_norm_1111_chn": "rv-review", "rv_e1_norm_2222_chn": "rv-review",
+    "rv_e1_norm_3333_chn": "rv-review",
+    "rv_e2_batchnorm_1111_chn": "rv-review", "rv_e2_batchnorm_2222_chn": "rv-review",
+    "rv_e2_batchnorm_3333_chn": "rv-review",
+    "rv_e4_ngf32_1111_chn": "rv-review", "rv_e4_ngf32_2222_chn": "rv-review",
+    "rv_e4_ngf32_3333_chn": "rv-review",
+    "rv_e5_bneck256_1111_chn": "rv-review", "rv_e5_bneck256_2222_chn": "rv-review",
+    "rv_e5_bneck256_3333_chn": "rv-review",
+    "rv_e7_aux01_1111_chn": "rv-review", "rv_e7_aux01_2222_chn": "rv-review",
+    "rv_e7_aux01_3333_chn": "rv-review",
+    "rv_e11_adamw_1111_chn": "rv-review", "rv_e11_adamw_2222_chn": "rv-review",
+    "rv_e11_adamw_3333_chn": "rv-review",
+    "rv_e3_refine2_1111_chn": "rv-review", "rv_e3_refine2_2222_chn": "rv-review",
+    "rv_e3_refine2_3333_chn": "rv-review",
 }
 
 # Eval budget (--n_samples) each experiment was screened/confirmed at.
@@ -133,6 +160,19 @@ N_SAMPLES = {
     # seedfloor600_*_chn: same _n50/_n50_gtsvg suffix issue as official_chn above,
     # scored at the confirmation budget (docs/english-candidate.md §6).
     "seedfloor600_1111_chn": 50, "seedfloor600_2222_chn": 50, "seedfloor600_3333_chn": 50,
+    # rv-review batch: every eval_<ckpt>.csv here has no _n<N> suffix (see
+    # eval_reconstruction_error.py's default --csv_out), but COMMON_ARGS in
+    # scripts/test_experiments.sh runs the whole batch at --n_samples 50, the
+    # confirmation budget, not the default screening fallback of 3.
+    "rv_seedfloor_1111_chn": 50, "rv_seedfloor_2222_chn": 50, "rv_seedfloor_3333_chn": 50,
+    "rv_e9_sigma050_1111_chn": 50, "rv_e9_sigma050_2222_chn": 50, "rv_e9_sigma050_3333_chn": 50,
+    "rv_e1_norm_1111_chn": 50, "rv_e1_norm_2222_chn": 50, "rv_e1_norm_3333_chn": 50,
+    "rv_e2_batchnorm_1111_chn": 50, "rv_e2_batchnorm_2222_chn": 50, "rv_e2_batchnorm_3333_chn": 50,
+    "rv_e4_ngf32_1111_chn": 50, "rv_e4_ngf32_2222_chn": 50, "rv_e4_ngf32_3333_chn": 50,
+    "rv_e5_bneck256_1111_chn": 50, "rv_e5_bneck256_2222_chn": 50, "rv_e5_bneck256_3333_chn": 50,
+    "rv_e7_aux01_1111_chn": 50, "rv_e7_aux01_2222_chn": 50, "rv_e7_aux01_3333_chn": 50,
+    "rv_e11_adamw_1111_chn": 50, "rv_e11_adamw_2222_chn": 50, "rv_e11_adamw_3333_chn": 50,
+    "rv_e3_refine2_1111_chn": 50, "rv_e3_refine2_2222_chn": 50, "rv_e3_refine2_3333_chn": 50,
 }
 
 # eval_<ckpt>_n<N>.csv -> (ckpt, N). Anything without the suffix falls back to

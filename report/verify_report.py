@@ -123,6 +123,19 @@ m1 = {1111:"e1_norm_chn", 2222:"a_e1_norm_2222_chn", 3333:"a_e1_norm_3333_chn"}
 chk("E1 at matched epoch", mean([f(one(name_exp=n,epoch=150,n_samples=3),'s_iou')-f(base[s],'s_iou')
                                  for s,n in m1.items()]), -0.0376)
 
+print("\n-- section 5.6, post-review batch --")
+rvb = {s: one(name_exp=f"rv_seedfloor_{s}_chn", epoch=150, n_samples=50) for s in (1111, 2222, 3333)}
+chk("rv-review chn L1 floor",   spread([f(r,'l1')    for r in rvb.values()]), 0.0151)
+chk("rv-review chn s-IoU floor",spread([f(r,'s_iou') for r in rvb.values()]), 0.0223)
+rvbase = rvb[1111]
+for k, pre, cl, ci in (("E9","rv_e9_sigma050",0.0064,-0.0052), ("E1","rv_e1_norm",0.0021,-0.0310),
+                       ("E2","rv_e2_batchnorm",-0.0068,0.0357), ("E4","rv_e4_ngf32",0.0048,-0.0039),
+                       ("E5","rv_e5_bneck256",0.0014,0.0031),   ("E7","rv_e7_aux01",0.0027,-0.0048),
+                       ("E11","rv_e11_adamw",0.0014,0.0000),    ("E3","rv_e3_refine2",0.0061,-0.0137)):
+    g = lambda s: one(name_exp=f"{pre}_{s}_chn", epoch=150, n_samples=50)
+    chk(f"rv {k} mean dL1",    mean([f(g(s),'l1')   -f(rvbase,'l1')    for s in rvb]), cl)
+    chk(f"rv {k} mean ds-IoU", mean([f(g(s),'s_iou')-f(rvbase,'s_iou') for s in rvb]), ci)
+
 print("\n-- section 6.5, quantization oracle --")
 # oracle_chn.csv is one row per font; every figure quoted is the column mean over 34 fonts.
 path = os.path.join(ROOT, "oracle_chn.csv")
