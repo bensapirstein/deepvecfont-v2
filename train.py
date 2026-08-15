@@ -40,8 +40,11 @@ class WeightEMA:
     EMA weights as the training weights rather than the raw ones; nothing in the
     sweep resumes, and check_infra asserts the flag is off by default.
 
-    Buffers (BatchNorm running stats, under --img_norm batch) are copied rather than
-    averaged, since they are already running averages.
+    Buffers (BatchNorm running stats, under --img_norm batch) go through the same
+    EMA update as the parameters, not a copy: update() applies mul_(d).add_(...) to
+    every floating-point state_dict entry uniformly, buffers included. That is a
+    defensible choice on its own (it is what several published EMA implementations
+    do), but it is not what an earlier version of this docstring claimed.
     """
 
     def __init__(self, model, decay):

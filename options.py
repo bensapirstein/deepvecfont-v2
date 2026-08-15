@@ -3,8 +3,11 @@ import argparse
 
 def str2bool(v):
     """argparse's `type=bool` maps any non-empty string to True, so `--flag False`
-    silently enables the flag. Used for new boolean flags; the pre-existing ones
-    (--resume, --multi_gpu, --tboard) still carry that behaviour."""
+    silently enables the flag. Used for new boolean flags. --multi_gpu and --tboard
+    are pre-existing (released upstream) and still carry the old behaviour; --resume
+    is new to this project but was added before this helper was and was never moved
+    over -- a real latent bug, deferred deliberately rather than fixed (see
+    PROJECT_PLAN.md section 8, "Deferred, deliberately")."""
     if isinstance(v, bool):
         return v
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
@@ -111,7 +114,7 @@ def get_parser_main_model():
     #   img_norm         -> models/norms.py -> model_main.py       (E2)
     #   ema_decay        -> train.py                               (E15)
     parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'adamw'], help='[E11] adam is the original torch.optim.Adam, where --weight_decay is L2-in-the-gradient and interacts with the adaptive scale; adamw decouples it. AdamW is already imported in train.py and unused')
-    parser.add_argument('--img_norm', type=str, default='layer', choices=['layer', 'group', 'batch', 'instance'], help="[E2] normalization in the image encoder and decoder. 'layer' is the original spatial LayerNorm([C,H,W]), which couples channel and spatial statistics and discards per-channel scale; the other three normalize per channel")
+    parser.add_argument('--img_norm', type=str, default='layer', choices=['layer', 'group', 'batch', 'instance'], help="[E2] normalization in the image encoder and decoder. 'layer' is the original spatial LayerNorm([C,H,W]), which couples channel and spatial statistics and discards per-channel scale; the other three normalize per channel. 'instance' degenerates at the encoder's [*,1024,1,1] bottleneck -- InstanceNorm2d normalizes over H,W only, which is empty there, so that layer's output is silently zeroed; kept as a documented option rather than removed, but it dropped out of the sweep at rung 1 for exactly this reason (see PROJECT_PLAN.md section 3.6), and 'batch' is what E2 actually reports")
     parser.add_argument('--img_norm_groups', type=int, default=32, help='[E2] target group count for --img_norm group; halved automatically until it divides the channel count, so the ngf-wide first layer still constructs')
     parser.add_argument('--ema_decay', type=float, default=0.0, help='[E15] decay of an exponential moving average of the weights, evaluated and checkpointed in place of the raw weights. 0 disables it and keeps the original behaviour; 0.999 is the usual value')
     parser.add_argument('--ema_warmup_steps', type=int, default=0, help='[E15] steps before the EMA starts tracking; the shadow is initialized from the weights, so 0 is fine and this exists only for the record')
