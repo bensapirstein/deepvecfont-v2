@@ -622,6 +622,6 @@ designed and costed one and dropped it on schedule grounds rather than on merit;
 
 **Code and data.** Upstream: `github.com/yizhiwang96/deepvecfont-v2`, mirrored on branch
 `main`; our work is the `main..repro` diff. Dataset: the authors' released Chinese and English
-vector font sets, built by `data_utils/`. `RESULTS.csv` holds all 113 scored checkpoints, one
+vector font sets, built by `data_utils/`. `RESULTS.csv` holds all 140 scored checkpoints, one
 row each. Every figure is regenerated from it by `report/make_figures.py` and every number in
 this report is checked against it by `report/verify_report.py`.
