@@ -32,8 +32,10 @@ Optional but recommended: `pip install wandb`. Training mirrors its metrics to W
 Biases alongside TensorboardX; without it the run still trains and still writes
 `checkpoint_metrics.csv`, which is what checkpoint selection actually reads.
 
-Before a long batch, `python scripts/check_infra.py` runs 196 assertions over the flags,
-the data and the harness. It is faster than discovering a typo six hours in.
+Before a long batch, `python scripts/check_infra.py` asserts the flags, the data and the
+harness against each other. 224 of its checks pass with no GPU and no torch; the norm-factory
+group needs both, and the script says so rather than counting a skip as a pass. It is faster
+than discovering a typo six hours in.
 
 ## 2. Data
 

@@ -249,7 +249,7 @@ arrive; where we later overruled one, we recorded the overrule and the reason.
 ### 4.2 Candidate changes
 
 We ran 21 distinct single-factor changes. Each moves one thing and holds everything else at
-the baseline value. Every new option defaults to the released behaviour, and a 196-check
+the baseline value. Every new option defaults to the released behaviour, and a preflight
 script asserts that, so a candidate's default reproduces the baseline exactly.
 
 Three candidates come from the paper-versus-code differences in section 1.1, and those are the
@@ -621,7 +621,7 @@ conda environment to a rebuilt version of this PDF.
 **The model code is one code path.** The reconstruction and the improved model are the same
 `train.py`, `models/` and `test_few_shot.py`; E9 is `--enc_noise_std_train 0.5` on the training
 command and nothing else. That holds for all 21 candidates: each is a flag that defaults to the
-released behaviour, and a 196-check preflight script asserts every default reproduces the
+released behaviour, and a preflight script asserts every default reproduces the
 baseline exactly. It is a weaker guarantee than it sounds, since it cannot catch a change that
 is correct and irrelevant, but it does rule out the failure where a candidate appears to help
 because it quietly moved something else as well.
