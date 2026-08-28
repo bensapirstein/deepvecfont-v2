@@ -125,9 +125,19 @@ git tag -f -a v1.0-submission -m "Final project submission"
 If §1 sent you down a branch where fewer than four archives exist, fix the checkpoint table
 in the README in the same edit. It currently promises four rows.
 
-**One thing to watch on any future rebase.** The cleanup commit deletes the runbooks by
-name, including this file. A file added to `docs/` on `repro` after the cut will follow a
-rebase onto `submission` unless you add it to that commit's deletion list.
+**Two things to watch on any future rebase.**
+
+The cleanup commit deletes the runbooks by name, including this file. A file added to
+`docs/` on `repro` after the cut will follow a rebase onto `submission` unless you add it to
+that commit's deletion list.
+
+And any commit on `repro` that touches `PROJECT_PLAN.md` makes the rebase stop on a
+modify/delete conflict, because the cleanup commit deletes a file the new commit edited.
+The resolution is always the deletion:
+
+```bash
+git rm PROJECT_PLAN.md && git rebase --continue
+```
 
 ## 5. Push
 
