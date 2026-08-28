@@ -116,6 +116,12 @@ ipython_config.py
 #                                      nothing beyond numpy on the Mac
 #   report/REPORT.pdf                 the deliverable itself
 
+# Papers. Linked from README.md rather than vendored: they are large, they are not
+# ours to redistribute, and arXiv is a more durable address than a git blob.
+DeepVecFontV2.pdf
+DeepVecFont v1.pdf
+FinalProjectPart2.pdf
+
 # Staging area for removal. This sandbox cannot delete files on the Mac, so anything
 # retired gets moved here and Ben removes the folder himself. Never tracked.
 _to_delete/

@@ -887,7 +887,7 @@ def main():
         for label in FAILED:
             print(f"  - {label}")
         return 1
-    print("\nAll pre-flight checks passed. Next: the GPU dry run on the cluster (see docs/infra-upgrade.md).")
+    print("\nAll pre-flight checks passed. Next: the GPU dry run (docs/REPRODUCE.md).")
     return 0
 
 

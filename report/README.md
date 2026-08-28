@@ -39,6 +39,12 @@ is the check: our decode of the stored outline against the dataset's own raster 
 `assets/font_choice_contact_sheet.png` records the one judgement made by eye, which font to
 draw, so that choice is visible rather than asserted.
 
-Model-output glyphs are not here. They exist only under `experiments/` on the cluster; see
-`../docs/pull-figure-assets.md`, which also fixes the rules for what such a figure may show
-before any of it is drawn.
+Model-output glyphs are not committed. Figures 7-9 are laid out from
+`assets/model_output_renders.npz` and `assets/model_output_l1.csv`, the small rasterized and
+scored forms of them; the raw decoded SVGs they came from stay under `experiments/`, where
+`render_model_output.py` and `rank_failures.py` produced these two files from them.
+
+The rule fixing what such a figure may show -- fonts and characters chosen before any glyph
+is looked at, both tails of the distribution rather than the flattering end, equal space for
+Chinese and English -- is stated in full in `make_model_comparison_figures.py`'s docstring,
+and `../docs/PROVENANCE.md` says where it was originally written down.
