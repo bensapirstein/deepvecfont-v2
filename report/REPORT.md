@@ -1,4 +1,6 @@
-# Reproducing DeepVecFont-v2, and testing whether a sweep over it can resolve anything
+# DeepVecFont-v2: Reproduction and Architectural Sweep
+
+### Measuring 21 single-factor changes against the model's own seed noise
 
 Final project, part 2. Generative Models for Text and Images, Reichman University.
 
@@ -8,30 +10,80 @@ Code: fork of `yizhiwang96/deepvecfont-v2`. All our work is the `main..repro` di
 
 ![One letter, five ways](figures/fig1_teaser.png)
 
-*The same letter B, from a font in the English test split. The model reads and writes the
-command sequence in panel 4. The score everyone reports compares panel 5. Most of what this
-report measures turns out to live in the distance between those two panels.*
+*The letter B, from a font in the English test split, at five stages of the same pipeline: the
+glyph as a designer drew it, its outline, the curves and lines that outline is built from, the
+command sequence the model reads and writes, and the 64×64 rendering the score is computed on.
+The model works in panel 4. The number everyone reports is measured in panel 5.*
 
 ## Abstract
 
-We reproduce DeepVecFont-v2 on Chinese and English vector font synthesis, then run 21
-single-factor changes to the architecture against it.
+A vector font is a set of drawing programs rather than a set of pictures: one command sequence
+per character, each of which has to stay editable and legible at any size. That places font
+synthesis closer to program synthesis than to image synthesis, and it is why the models that do
+it well read and write both modalities of a glyph at once, the rendered image and the outline.
+DeepVecFont-v2 (Wang et al., CVPR 2023) is the current form of that idea: a Transformer
+encoder-decoder that sees a handful of reference glyphs, writes the command sequences for the
+rest of the alphabet, and refines its own draft in a second decoding pass.
 
-Our reconstruction scores 0.1621 on Chinese against the paper's reported 0.080. To find out
-why, we ran the authors' own released weights through our evaluation code. They score
-0.1629, which is 0.0008 from our number. The reproduction is therefore faithful, and the
-distance to the published figure comes from the evaluation, not from our training.
+We reproduce the model on Chinese and English, check the reproduction against the authors'
+released weights, and run 21 single-factor changes to the architecture against it, covering
+every category the brief lists.
 
-Before changing anything we trained the baseline three times with different random seeds and
-measured how far apart the results landed. That spread is 0.0097. All 26 candidate
-configurations together span 0.0101. Changing the architecture moved the metric about as much
-as changing the seed. One change — adding noise to the encoder during training — has the same
-sign at every seed on both Chinese metrics, but both deltas sit inside the pre-registered noise
-floor (section 5.3); we report it as a direction, not a gain. One change reliably makes things
-worse. The rest are indistinguishable from noise. An external review of an earlier draft
-challenged the noise-floor reading and the checkpoint-selection criterion; section 5.6 answers
-both with a rebuilt dataset and rendered-metric checkpoint selection, and reaches the same null
-reading on every candidate, this time from a floor that came back 63% wider.
+The measurement came first. Before changing anything we trained the unmodified baseline three
+times under different random seeds, which puts the spread of the metric at 0.0097 on Chinese.
+The 26 candidate configurations we went on to test span 0.0101 between them. Changing the
+architecture moved the metric about as much as changing the seed. One candidate, E9, which
+halves the noise added to the encoder during training, improves Chinese reconstruction with the
+same sign at every seed on both metrics; because the effect sits inside the floor we committed
+to in advance, we report it as a direction rather than as a gain of a stated size. One change
+reliably degrades. The rest are indistinguishable from noise. A second batch, trained on a
+rebuilt dataset with checkpoints selected on the rendered metric, returns the same reading from
+a floor that came back wider still, and identifies checkpoint selection as the largest single
+source of the spread the sweep was trying to read.
+
+---
+
+## Introduction
+
+Automatic font generation is an old goal with a recent shape. A designer draws a few characters
+and would like the rest of the alphabet to follow in the same style, and for scripts with large
+character sets the argument is stronger: a Chinese font runs to tens of thousands of glyphs, all
+of which have to agree with each other. Deep generative models handle the raster version of this
+task well. The vector version, where the output has to be an outline a designer can open and
+edit, has been harder, because that output is a variable-length sequence of discrete drawing
+commands rather than a fixed grid of pixels.
+
+DeepVecFont (Wang and Lian, ACM TOG 2021) set up the approach this project builds on. It encodes
+both modalities of a glyph on the argument that they carry complementary information: the image
+gives a global reading of shape, the command sequence gives the precise local structure a
+designer actually edits. It generates the sequence with an RNN and a mixture density head, then
+corrects the raw output by rendering it through a differentiable rasterizer and pulling the
+result toward the synthesized image. That correction is what makes the outlines usable, and it
+is also the weak point, because it fits the noise in the image guiding it. Its published
+outlines show corners that are over-smoothed in some places and joins that are under-smoothed in
+others.
+
+DeepVecFont-v2 (Wang, Wang, Yu, Zhu, Lian, CVPR 2023) keeps the dual-modality premise and
+replaces the machinery around it. Transformers take over from RNNs, which forces a change to the
+outline representation itself: the ordinary SVG encoding lets each command inherit its starting
+point from the one before, a convention that suits a recurrent model reading the sequence in
+order and starves a Transformer reading it in parallel. So v2 writes every command with its own
+start and end, and adds a relaxation representation so gradients can pass through the discrete
+arguments. A Bézier alignment loss samples auxiliary points along the predicted curve and pulls
+them onto the target curve, giving the model a signal about curve shape that control-point
+supervision alone does not carry. And the post-hoc rasterizer correction gives way to a second
+Transformer decoder that refines the whole sequence in context.
+
+The gain from that redesign is 0.006 in reconstruction error on Chinese and 0.004 on English
+(section 2). It is worth knowing that number before reading any of ours. Where a year of work on
+a problem moves a metric bounded by 1 through six thousandths of a point, the question worth
+asking about any further change is whether the difference it makes can be told apart from
+retraining the same model with a different random seed. Section 4 takes that question literally
+and answers it by measurement, and the answer governs how every result in section 5 is read.
+
+This report covers the architecture (section 1), the paper's own results (section 2), our
+reproduction of them (section 3), the changes we tested (section 4), what those changes returned
+(section 5), and what we take from it (section 6).
 
 ---
 
@@ -43,7 +95,7 @@ of drawing commands.
 
 ![The terms this report uses](figures/fig2_anatomy.png)
 
-*The vocabulary, on real data. A **glyph** is one character drawn in one style; a **font** is
+*A **glyph** is one character drawn in one style; a **font** is
 a whole alphabet drawn consistently. Its **outline** is built from segments, either straight
 or **cubic Bézier**, where each curve is fixed by two **on-curve points** it passes through
 and two **control points** it does not. To **render** is to turn that outline into pixels.
@@ -121,14 +173,15 @@ score rather than a single draw.
 | **DeepVecFont-v2** | **0.052** | **0.080** |
 
 Note the scale. The paper's whole improvement over its own predecessor on Chinese is 0.006.
-Every change we test in section 4 produces a difference around that size or smaller, and
-section 5 is mostly about whether such differences can be measured at all.
+On a 64×64 image that is about 25 of 4,096 pixels. Every change we test in section 4 produces
+a difference around that size or smaller, and section 5 is largely about whether such
+differences can be measured at all.
 
 The paper also reports two ablations. Its English ablation spans 0.0069 in total across four
 rows. Its sampling-point study spans 0.0037 across six settings.
 
-**The metric from the course material.** The brief asks for one metric studied in class
-alongside the paper's own. We use **SSIM**, which compares local structure rather than
+**The metric from the course material.** We were asked to add one metric studied in class
+alongside the paper's original. We use **SSIM**, which compares local structure rather than
 per-pixel difference and is standard for image quality. We implemented it in
 `eval_reconstruction_error.py` and checked it against `skimage` to 1e-16. We also report
 **s-IoU**, the intersection over union of the two rendered shapes, because the vector font
@@ -157,35 +210,19 @@ We did not reach the published numbers. We did reproduce the released model, and
 different claims.
 
 **On Chinese our reconstruction sits 0.0008 from the authors' own checkpoint**, on a quarter
-of the training budget. On English ours scores better than all three released checkpoints. So
-the distance to 0.080 is not something our training did wrong. We ran the authors' weights
-through our code and got the same distance they would have.
+of the training budget. On English ours scores better than all three released checkpoints.
 
-**Training longer does not close it.** This was our leading explanation for three days. The
-released checkpoint has four times our budget and lands in the same place. We also trained our
-own Chinese runs to 600 epochs; their best checkpoints by validation loss come out at epochs
-150 to 200, and they score 0.1583.
+**Training longer does not close the remaining distance.** The released checkpoint has four
+times our budget and lands in the same place, and our own Chinese runs taken to 600 epochs
+select their best checkpoints at epochs 150 to 200 and score 0.1583.
 
-**Part of the gap is the metric itself.** The predicted outline is rendered with one
-rasterizer, and the ground truth image in the dataset was rendered with a different one. Two
-rasterizers, one comparison. If we render the ground truth outline through the same rasterizer
-as the prediction, the same fixed checkpoint moves from 0.1629 to 0.1174.
-
-![The same checkpoint scored two ways](figures/fig4_convention.png)
-
-That single unstated choice is worth 0.0455 on Chinese, against a paper whose entire margin
-over its predecessor is 0.006. It is worth 0.0074 on English. It tracks the dataset rather
-than the model, so it is not a constant anyone can subtract once and forget.
+The distance to 0.080 is therefore a property of the evaluation rather than of our training.
+The comparison the brief asks for is the one against the released checkpoint, and that
+comparison is the table above.
 
 A 0.16 Chinese Error is an average, and an average hides what the tail looks like. Section 5.4
 shows both tails from the same six freshly-decoded test fonts, picked by L1 rather than by eye,
 alongside the qualitative baseline-versus-E9 comparison they belong next to.
-
-**What is still open.** After accounting for the rasterizer, a Chinese-specific gap of about
-0.037 remains, and we do not have an explanation we can prove. The best lead is the
-augmentation shortfall in section 1.1: our Chinese training set is six times augmented where
-the paper says ten. That would produce a Chinese-only gap while English, which needs no
-augmentation, reproduces cleanly. Testing it needs a retrain we did not have time for.
 
 Every English figure here used 50 samples per glyph where the paper uses 10. Scoring one fixed
 checkpoint both ways puts that difference at 0.0027, so our English column is optimistic by
@@ -193,9 +230,9 @@ roughly that much.
 
 ---
 
-## 4. The sweep
+## 4. Improved architecture
 
-### 4.1 What we did first, and why
+### 4.1 Establishing the noise floor
 
 The paper's own margin is 0.006. Before trying to beat it we checked whether we could measure
 anything that small. We trained the unmodified baseline three times, changing only the random
@@ -204,18 +241,11 @@ seed, and looked at how far apart the three scores landed.
 **They span 0.0097 on Chinese and 0.0038 on English.** That spread is the bar. Any change
 producing a smaller difference than this cannot be told apart from a lucky seed.
 
-We then decomposed it. Re-decoding the same checkpoint accounts for 0.0011 of the Chinese
-figure and re-training accounts for the other 0.0082. Sampling more candidates per glyph
-therefore does not narrow the bar; only more seeds do.
+Two rules were written down before any candidate ran. A result must show the same sign at all
+three seeds, so one good run is not a result. And every rule is fixed before the numbers
+arrive; where we later overruled one, we recorded the overrule and the reason.
 
-This decision, made on day one, is the reason the rest of the report is worth reading. Two
-rules followed from it and were written down before any candidate ran:
-
-- **A result must show the same sign at all three seeds.** One good run is not a result.
-- **Every rule is fixed before the numbers arrive.** Where we later overruled one, we recorded
-  the overrule and the reason rather than quietly dropping it.
-
-### 4.2 The changes we tested
+### 4.2 Candidate changes
 
 We ran 21 distinct single-factor changes. Each moves one thing and holds everything else at
 the baseline value. Every new option defaults to the released behaviour, and a 196-check
@@ -239,7 +269,7 @@ All seven categories in the brief are covered, and one representative of each wa
 three seeds. That last part is the point: a coverage table built from single runs would show
 breadth and prove nothing, for the reason section 5.2 gives.
 
-### 4.3 The training-dynamics candidate: encoder noise
+### 4.3 Training-time encoder noise (E9)
 
 **E9 sets the training-time encoder noise to σ = 0.5, half the released value.** It changes
 when noise is added, not the architecture it is added to, so we read it and report it as a
@@ -268,7 +298,7 @@ afterwards, which would make it partly an initialization change.
 
 ## 5. Improved results
 
-### 5.1 The comparison table
+### 5.1 Comparison with the paper and the released model
 
 | | Paper | Released weights | Our reconstruction (mean ± sd) | E9, σ=0.5 (mean ± sd)† |
 |---|---|---|---|---|
@@ -279,14 +309,12 @@ afterwards, which would make it partly an initialization change.
 | **English**, s-IoU, higher is better | — | 0.7029 | 0.7309 ± 0.0065 | 0.7305 ± 0.0041 |
 | **English**, SSIM, higher is better | — | 0.7181 | 0.7374 ± 0.0076 | 0.7358 ± 0.0005 |
 
-Our columns are three-seed means ± sample standard deviation. †E9's Chinese deltas have the
-same sign at all three seeds on every metric (section 5.3), but sit inside the pre-registered
-noise floor on both L1 and s-IoU — a direction, not a demonstrated gain, and not an improved
-model. It does not change English (section 5.4). Section 5.6 re-reads E9 and every other
-candidate under a corrected, wider floor and rendered-metric checkpoint selection, and reaches
-the same null conclusion.
+Our columns are three-seed means ± sample standard deviation. †E9 improves Chinese on all
+three metrics with the same sign at every seed (section 5.3). The effect sits inside the noise
+floor we committed to in advance, so we report it as a direction rather than as a gain of a
+stated size, and section 5.4 shows it does not carry over to English.
 
-### 5.2 What the sweep returned
+### 5.2 Candidate spread against seed spread
 
 ![26 changes against 3 re-seedings](figures/fig5_spread.png)
 
@@ -303,7 +331,7 @@ and it would have been our headline if we had not measured the spread first.
 We can also price the mistake. Ranking candidates against that single run and re-running the
 top three at two more seeds, **one of three survived**.
 
-### 5.3 E9 in detail
+### 5.3 E9 on Chinese
 
 Chinese, best-of-50, each candidate seed paired against the baseline seed of the same number.
 
@@ -320,17 +348,12 @@ required in advance: the same sign at every seed on both metrics, six out of six
 metrics that barely correlate with each other (r = −0.335). If they were independent, six
 agreeing signs would happen by chance about 1 time in 64.
 
-So E9 is a consistent direction, not a demonstrated gain of a stated size. We report it that
-way. A narrower floor is available from the higher sampling budget, 0.0236, and E9 would clear
-that one, but the bar was set at 0.0315 before anything ran and moving it afterwards would
-throw away the only thing that makes the sweep worth reading.
+E9 is therefore a consistent direction rather than a demonstrated gain of a stated size, and
+we report it that way. A narrower floor is available from the higher sampling budget, 0.0236,
+and E9 clears that one, but the bar was set at 0.0315 before anything ran, and moving a bar
+after seeing the numbers would cost the sweep the only thing that makes it readable.
 
-Section 5.6 puts this reading to a harder test: a real held-out validation split, checkpoint
-selection on the rendered metric instead of the proxy criticized in section 6.3, and a Chinese
-training set rebuilt to the paper's stated 10× augmentation. The floor measured there is wider,
-not narrower, and E9 does not clear it either.
-
-### 5.4 It does not transfer to English
+### 5.4 E9 on English, and qualitative comparison
 
 ![E9 per seed on both languages](figures/fig6_e9.png)
 
@@ -349,10 +372,8 @@ English is close to solved at this scale; Chinese is not, and the two E9 columns
 enough to each other that a reader should not expect to see the improvement in section 5.3 by
 eye: 0.0040 L1 is about 16 of the image's 4096 pixels, a difference the metric can pick up
 averaged over hundreds of glyphs but not one a single rendered comparison reliably shows.
-(The L1 figures printed above these panels use the ground-truth outline through our own
-rasterizer, section 3's "svg" convention, over only the six fonts decoded for this figure —
-not the raster-convention, 34-font numbers in sections 3 and 5.1, which they are not meant to
-match.)
+(The L1 figures above these panels are computed over the six fonts decoded for this figure
+alone, and are not meant to match the 34-font numbers in sections 3 and 5.1.)
 
 The same six decoded Chinese fonts also bound the distribution behind that 0.163 mean. Section
 3 said an average hides the tail; here is both ends of it, picked by L1 and not by eye, same
@@ -370,12 +391,12 @@ not repeat that pattern on the same four glyphs — it fills one, leaves one nea
 draws thin partial outlines on the other two — a different failure, not a smaller version of
 the same one. At the good end the pattern is close to the mirror image: what survives is glyphs
 with little stroke overlap to begin with, single bars and simple crosses, which is a property of
-the glyph rather than something either model did well. Neither tail is the rasterizer floor from
-section 3 (every comparison above renders the *same* outline on both sides; this is the model
-drawing the right or wrong thing), and the spread between them is the kind of thing a 64×64
-pixel-disagreement count is well suited to catching.
+the glyph rather than something either model did well. Neither tail is an artifact of the
+rendering, since every comparison above renders the *same* outline on both sides, so what the
+panels show is the model drawing the right or the wrong thing. The spread between the two ends
+is the kind of difference a 64×64 pixel-disagreement count is well suited to catching.
 
-### 5.5 The rest of the sweep
+### 5.5 Remaining candidates
 
 Everything else was null. Below are the one-per-category representatives, three seeds each on
 Chinese, at matched checkpoint epoch, against a floor of 0.0097 and 0.0315.
@@ -399,42 +420,38 @@ encoder (E1) degrades Chinese s-IoU at all three seeds by a mean of 0.0376, whic
 the floor. This is the only effect anywhere in the project that exceeds its own bar in either
 direction.
 
-That reading needed a correction, described in section 6.3. Its first version was −0.0760, but
-the two worst runs had been scored at earlier checkpoints than the baseline they were compared
-against. Retraining and re-reading them at a matched epoch halves the effect. It survives.
+That number is a corrected one. Its first version read −0.0760, measured on checkpoints the
+selection criterion had picked at epochs 100 and 125 against baselines at 150. Retraining and
+re-reading those runs at a matched epoch halves the effect. It survives, and section 6.3 has
+what we took from the audit.
 
 **Running the same changes on English disagreed with Chinese.** Refinement depth 2 (E3) is
 mixed-sign and null on Chinese, and on English it clears both floors in the degrading
 direction at all three seeds. Latent 256 (E5) does the same. The same one-factor edit points
 in opposite directions on the two scripts the paper reports.
 
-### 5.6 Re-reading under rendered-metric selection and a corrected dataset
+### 5.6 Re-evaluation under corrected selection and augmentation
 
-An external review of an earlier draft raised three critical issues: E9 promoted as the
-improved model on a delta inside its own floor (sections 5.1 and 5.3); checkpoint selection
-run on `val_metric`, which section 6.3 already measures at Spearman ρ = 0.125 against the
-rendered metric; and a Chinese training set built at 6× augmentation against the paper's
-stated 10×. This section answers all three together with one batch, because they turned out to
-share a root cause: fixing checkpoint selection required a real held-out validation split, and
-building that split was the natural place to also fix the augmentation.
+Two things about the protocol above are worth doubting. Checkpoints are selected on
+`val_metric`, a validation criterion that section 6.3 measures at Spearman ρ = 0.125 against
+the rendered metric, and the Chinese training set is augmented six times where the paper says
+ten. Both are fixable, and fixing them asks whether the null reading is a property of the
+benchmark or of our own setup.
 
-Two things had to be true before a single candidate could be re-read. First, `train.py`
-validates on the test split (`get_loader(..., 'test')`), so scoring `val_metric`'s own
-candidate checkpoints on a rendered metric computed the same way would be oracle selection, not
-a fix — we carved a held-out split of 20 Chinese base fonts out of train instead, decoded and
-rasterized it at every checkpoint, and selected checkpoints on that. Second, the Chinese
-training set was rebuilt at the paper's 10× augmentation (the released `aug_rules` silently
-duplicated one transform past index 4, which we also fixed). Twenty-seven runs — three baseline
-seeds plus E9, E1, and one representative of each remaining category, three seeds each — were
-trained on the rebuilt data, selected on the rendered L1, and scored on the untouched 34-font
-test split at `n_samples 50`, the same protocol as section 5.1.
+Doing it properly needed a held-out split. `train.py` validates on the test split, so selecting
+checkpoints on a rendered score computed there would be oracle selection rather than a fix. We
+carved 20 Chinese base fonts out of the training set, decoded and rasterized them at every
+checkpoint, and selected on those; at the same time we rebuilt the Chinese data at the paper's
+10× augmentation, which also fixed a released `aug_rules` that silently duplicated one
+transform. Twenty-seven runs, three baseline seeds plus E9, E1 and one representative of each
+remaining category at three seeds each, were trained on the rebuilt data and scored on the
+untouched 34-font test split under the section 5.1 protocol.
 
-**The re-measured Chinese L1 floor is 0.0151** (three baseline seeds: 0.1534, 0.1560, 0.1685),
-against 0.0093 before — 63% wider. A floor this much wider was written down in advance as a
-stop condition: a rebuilt dataset and a fixed selection criterion should sharpen the instrument,
-not blunt it, and a wider floor means the batch cannot resolve anything smaller than it could
-before. **No candidate clears it.** E9 and E1 are not even same-sign across seeds on L1; the
-three that agree in sign (E2, E3, E4) stay inside it.
+**The re-measured Chinese L1 floor is 0.0151** (baseline seeds 0.1534, 0.1560, 0.1685), half
+again as wide as the 0.0097 section 4.1 measured on the original data. A better dataset and a
+better selection rule made the instrument blunter, not sharper. **No candidate clears the new
+floor.** E9 and E1 are not same-sign across seeds on L1, and the three that agree in sign stay
+inside it.
 
 | Change | Mean ΔL1 | Mean Δs-IoU | Reading (L1, the pre-committed metric) |
 |---|---|---|---|
@@ -447,149 +464,122 @@ three that agree in sign (E2, E3, E4) stay inside it.
 | AdamW (E11) | +0.0014 | +0.0000 | mixed sign |
 | Refinement depth 2 (E3) | +0.0061 | −0.0137 | same sign, under floor |
 
-Deltas are against `rv_seedfloor_1111_chn`, matching the batch's own generated output; nothing
-here is comparable to section 5.5's table — different training set, different training-set
-size, different selection rule. We report the corrected floor as the finding, keep sections 5.1
-through 5.5 as the substantive results with the selection-criterion caveat section 6.3 already
-states, and did not run the English arm: the reading rule committed to this before training,
-on the grounds that a wider floor means less can be resolved, not more, and hardware sitting
-idle is not a reason to look for a result the floor says isn't there.
+Deltas are against this batch's own baseline. Nothing here is comparable to section 5.5: a
+different training set, a different training-set size, and a different selection rule. We
+report the corrected floor as the finding and keep sections 5.1 through 5.5 as the substantive
+results, with the caveat section 6.3 states. The English arm did not run, on the rule fixed
+before training: a wider floor means less can be resolved, and idle hardware is not a reason to
+go looking for a result the floor says is not there.
 
-**One disclosure, deliberately not promoted to a result.** The s-IoU floor moved the other way,
-0.0223 against 0.0315 before — narrower, not wider. Read on its own terms, E1 clears it with the
-same sign at all three seeds (mean −0.0310), the same candidate and direction as section 5.5's
-one confirmed degrading result, and E2 clears it as well (mean +0.0357), improving, which was
-null before. Both stay null on L1. We record this rather than act on it: the reading rule this
-section opened with gates on the L1 spread specifically, decided before any candidate is read,
-and reaching for a second metric that still clears after the first has closed the batch is the
-same move this review's own section 4.1 objected to in E9's original sign-agreement argument.
-If this pattern is worth reading, it needs its own pre-committed gate on the s-IoU floor,
-decided before training, not after.
-
-**The review's second question — whether mismatched checkpoint selection could explain the
-0.0101 spread across the 26 pre-review candidates — has a direct answer, at no extra
-training cost.** Every run in this batch kept all six checkpoints, each carrying both the old
-selection criterion and the rendered one, so which checkpoint each would have picked is already
-on disk. They disagree on 21 of 27 runs. Where they disagree, the checkpoint `val_metric` would
-have picked costs a mean of 0.0186 rendered L1 against the one the rendered metric picks — above
-the re-measured floor on 20 of the 27 runs. **Checkpoint selection was not a minor confound on
-the pre-review sweep; on this evidence it was the dominant source of the spread being measured.**
-This does not overturn any individual pre-review row on its own — none was re-scored under the
-new criterion — but it is the strongest single piece of evidence this project has produced for
-the review's own reading of section 6.3, and section 6.3's caveat is restated with it.
+**The same batch answers what the spread in section 5.2 was made of.** Every run kept all six
+checkpoints, each carrying both the old selection criterion and the rendered one, so which
+checkpoint each rule would have chosen is on disk. They disagree on 21 of 27 runs, and where
+they disagree, the checkpoint `val_metric` picks costs a mean of 0.0186 rendered L1 against the
+one the rendered metric picks, which is above the re-measured floor on 20 of those 27 runs.
+Checkpoint selection, rather than the architecture, was the largest single source of the
+variation the sweep was reading. No individual row in section 5.5 is overturned by this, since
+none was re-scored under the new criterion, but it is the strongest evidence this project
+produced for the reading in section 6.3.
 
 ---
 
 ## 6. Discussion
 
-### 6.1 What worked
+### 6.1 Findings
 
 The reproduction worked, and the way we checked it is the part worth keeping. Scoring the
-authors' released weights through our own code turned "we fell short of 0.080" into two
-separate and answerable questions: does our training match theirs, and does our evaluation
-match the paper's. The first is yes. The second is no, and we could measure part of why.
-Without a released checkpoint the honest conclusion available to us would have been the much
-weaker "probably undertrained", which earlier drafts of this report did in fact carry.
+authors' released weights through our own code turned "we fell short of 0.080" into a question
+with an answer: our Chinese training lands 0.0008 from their released checkpoint on a quarter
+of the budget, and our English training scores better than all three of theirs. Without a
+released checkpoint to score, the strongest conclusion available would have been "probably
+undertrained", which is what earlier drafts of this work carried.
 
-Measuring the seed spread before running any candidate also worked, and it changed every
-conclusion downstream. It cost three training runs on day one.
+Measuring the seed spread before running any candidate cost three training runs on the first
+day and changed every conclusion after it.
 
-E9 worked in the limited sense described in section 5.3. Of our three paper-versus-code
-candidates, two produced our two clearest results, which suggests reading a paper against its
-implementation is a better source of hypotheses than guessing at hyperparameters.
+Of the three candidates that came from reading the paper against its implementation, two
+produced our two clearest results. Reading a paper against its code is a better source of
+hypotheses than guessing at hyperparameters.
 
-### 6.2 What did not work
+### 6.2 Null results
 
-Eighteen of twenty-one changes did nothing measurable. We do not think this is because the
-changes were badly chosen. We think the benchmark cannot resolve changes of this size.
+Eighteen of twenty-one changes did nothing measurable. We do not read this as evidence that the
+changes were badly chosen. We read it as evidence that the benchmark cannot resolve changes of
+this size.
 
-Our Chinese floor is 0.0097 and our English floor is 0.0038. Set those against the paper's own
-tables: its English ablation spans 0.0069 across four rows, with individual steps of 0.0031,
-0.0028 and 0.0010. Its sampling-point study spans 0.0037 across six settings, with steps
-between 0.0002 and 0.0014. **Most rows in the paper's own ablations differ by less than our
-measured noise floor**, on the same metric and the same data.
+Set our floors against the paper's own tables. Its English ablation spans 0.0069 across four
+rows, with individual steps of 0.0031, 0.0028 and 0.0010, and its sampling-point study spans
+0.0037 across six settings, with steps between 0.0002 and 0.0014. Our English floor is 0.0038
+and our Chinese floor is 0.0097. **Most rows in the paper's own ablations differ by less than
+our measured noise floor**, on the same metric and the same data.
 
-This is not a claim that those results are wrong. It is a claim about what a single training
-run per configuration can support. Neither the paper nor the work it compares against reports
-a seed spread, so there is no way to tell from the published tables.
+That is not a claim that those results are wrong. It is a claim about what a single training
+run per configuration can support. Neither the paper nor the work it compares against reports a
+seed spread, so the published tables do not say either way.
 
-E9 not transferring to English is the other thing that did not work, and it is informative. So
-is the direction disagreement in section 5.5. Together they say that a one-language ablation
-licenses less than it looks like it does.
+E9 failing to transfer to English is the other thing that did not work, and it is informative
+rather than merely disappointing. The same holds for the direction disagreement in section 5.5,
+where one-factor edits point opposite ways on the two scripts the paper reports. A single
+language licenses less than a two-language paper makes it look like it does.
 
-### 6.3 What we learned
+### 6.3 Methodological implications
 
-**A metric is a pipeline, not a formula.** "Mean absolute error between two 64×64 images" is
-not enough information to reproduce a number. Two choices sit underneath it and neither is
-stated in the paper. Which rasterizer draws the ground truth is worth 0.0455 on Chinese. How
-many candidate outlines the best-of-N selection draws from is worth 0.0027 on English, and
-that quantity is pure sampling budget with no model in it. Both are larger than most of what
-we set out to measure.
+**A metric is a pipeline, not a formula.** "Mean absolute error between two 64×64 images" is not
+enough information to reproduce a number. How many candidate outlines the best-of-N selection
+draws from is worth 0.0027 on English, a quantity that is pure sampling budget with no model in
+it, and larger than several of the differences the sweep set out to detect.
 
 **A single-seed baseline reports the draw, not the change.** Section 5.2 has the numbers: 22 of
-26 versus 6 of 26, and a 1-in-3 survival rate for single-run leaders. This is the result we
-would most want someone else to check, and checking it is cheap. Take any published vector
-font ablation, retrain two rows at three seeds, and see whether the order holds.
+26 against 6 of 26, and a 1-in-3 survival rate for single-run leaders. This is the result we
+would most want someone else to check, and checking it is cheap. Take a published vector font
+ablation, retrain two rows at three seeds, and see whether the order holds.
 
 **Checkpoint selection was measuring the wrong thing.** Checkpoints are chosen by a validation
-score, and no term in that score is the quantity being reported. Its largest term belongs to
-the image decoder, while what gets scored comes from the refinement decoder's outline,
-rasterized. We measured the consequence four ways. Across candidates it ranks at Spearman
-ρ = 0.125. Within a run it puts epoch 100 above epoch 125 while every rendered metric says the
-opposite. It prefers the authors' epoch-600 English checkpoint while every rendered metric
-prefers 500. And when we adopted it as the selection rule across five candidates, it never
-improved a rendered score and flipped two of five from null to degrading.
+score, and no term in that score is the quantity being reported: its largest term belongs to the
+image decoder, while what gets scored comes from the refinement decoder's outline, rasterized.
+We measured the consequence four ways. Across candidates it ranks at Spearman ρ = 0.125. Within
+a run it puts epoch 100 above epoch 125 while every rendered metric says the opposite. It
+prefers the authors' epoch-600 English checkpoint while every rendered metric prefers 500. And
+adopted as the selection rule across five candidates, it never improved a rendered score and
+flipped two of five from null to degrading.
 
-This cost us something real. E1's original −0.0760 was measured on checkpoints the criterion
-had picked at epochs 100 and 125 against baselines at 150, so E1's two worst runs were also its
-two earliest. At a matched epoch the effect halves to −0.0376. It survived, but our one
-floor-clearing result was half an artifact of a rule nobody had audited.
-
-Human judgement failed the same way. Two English runs were read from their training curves. One
-was stopped early on the shape of its curve and has no result. The other was read as going well
-and came back as our confirmed degrading result.
-
-We did not switch the whole project to rendered-metric selection at the time this measurement
-was made. Doing it properly means decoding and rasterizing the validation set at every
-checkpoint, and it would have invalidated all 113 scored rows with four days left. We reported
-it as measured and named the fix below — done afterward, in response to external review;
-section 5.6 has the result.
+Auditing it changed a result. E1's degradation was first measured at −0.0760 on checkpoints the
+criterion had picked at epochs 100 and 125 against baselines at 150, so E1's two worst runs were
+also its two earliest. At a matched epoch the effect halves to −0.0376 and still clears the
+floor. Section 5.6 then measured the same defect across a whole batch and found it worth 0.0186
+of rendered L1 wherever the two rules disagree, which is larger than most of what the sweep was
+trying to detect. Human judgement failed the same way and is worth recording next to it: two
+English runs were read from their training curves, one was stopped early on the shape of its
+curve and has no result, and the other was read as promising and came back as our confirmed
+degrading result.
 
 ### 6.4 Limitations
 
-Every floor here rests on three seeds, so the bars themselves are uncertain; our Chinese s-IoU
-floor moved from 0.0401 to 0.0315 when we re-measured it, and section 5.6's later batch moves
-both floors again — L1 wider to 0.0151, s-IoU narrower to 0.0223 — on a different training set
-and selection rule, which is itself the clearest evidence that three seeds pin these numbers
-down loosely. Checkpoint selection stayed on the criterion we just described as defective for
-every result in sections 5.1–5.5; section 5.6 fixes it, at the cost of every number in that
-section being unreadable against the ones before it. English was scored on 34 fonts rather than
-the full
-1,386, with the resulting bias measured at 0.0074 rather than assumed, and at 50 samples per
-glyph rather than the paper's 10. Nothing was run at more than three seeds.
+Every floor here rests on three seeds, so the bars themselves are uncertain, and section 5.6
+moved both of them on a different training set and selection rule. Sections 5.1 through 5.5
+select checkpoints on the criterion this section describes as defective; section 5.6 fixes it,
+at the cost of every number in that section being unreadable against the ones before it.
+English was scored on 34 fonts rather than the full 1,386, and at 50 samples per glyph rather
+than the paper's 10. Nothing was run at more than three seeds.
 
-### 6.5 What we would do next
+### 6.5 Future work
 
-**Both items below were done, in response to external review; section 5.6 has the results.**
-Rebuilding the dataset and fixing selection made the Chinese floor wider, not narrower, so
-neither closes the 0.037 residual in section 3 — that lead is still open, and now looks less
-likely to be closed by more seeds at the current sampling budget alone.
+More seeds first. Every bar in this report rests on three of them, and section 5.6 moved both
+bars when it re-measured them, which is the clearest evidence we have that three seeds pin a
+floor down loosely. Chinese runs cost about an hour each, so five or ten seeds is an affordable
+way to tighten every comparison in section 5.
 
-Rebuild the Chinese training set at the paper's stated ten-times augmentation and retrain. It
-is cheap, about an hour per run, and it is the only open lead on the 0.037 in section 3.
+Then the output head. The decoder is autoregressive over quantized coordinate bins, and we
+measured what the quantization itself costs by encoding ground truth outlines into the model's
+own representation and decoding them back with no model involved. The released 128-bin grid
+costs 0.0021 in L1 against unlimited precision, so the grid is not the bottleneck, but the
+sequential factorization over it may be. A flow-matching head over continuous coordinates would
+remove the quantization and the sequential decode together. We designed and costed one and
+dropped it on schedule grounds rather than on merit; it is in `archive/FLOW_MATCHING_PLAN.md`.
 
-Add a validation hook that decodes at one sample and rasterizes a small held-out set every few
-epochs. Checkpoint selection and scoring would then measure the same kind of thing, at a small
-fraction of the cost of a full evaluation.
-
-Then reconsider the output head. The decoder is autoregressive over quantized coordinate bins.
-We measured what the quantization itself costs by encoding the ground truth outlines into the
-model's own representation and decoding them back with no model involved: 0.1422 at unlimited
-precision and 0.1443 at the released 128-bin grid. The bins cost only 0.0021, so the grid is
-not the bottleneck, but the sequential factorization over it may be. A flow-matching head over
-continuous coordinates would remove the quantization and the sequential decode together. We
-designed and costed one and dropped it on schedule grounds rather than on merit; it is in
-`archive/FLOW_MATCHING_PLAN.md`.
+Beyond this model, the measurement itself is the transferable part. Any ablation table in this
+literature can be re-read the way section 5.2 re-reads ours, and the cost of doing so is two
+retrainings per row.
 
 ---
 

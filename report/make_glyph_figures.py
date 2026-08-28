@@ -149,10 +149,10 @@ def teaser(fid="0013", ch="B"):
     frame(axes[4], "5. rendered to 64x64")
     draw_raster(axes[4], fid, ch)
 
-    fig.text(.5, .015,
-             "The model reads panel 4 and writes panel 4. The reported metric compares "
-             "panel 5. Everything this report measures happens in the gap between them.",
-             ha="center", fontsize=8.2, color=INK)
+    # fig.text(.5, .015,
+    #          "The model reads panel 4 and writes panel 4. The reported metric compares "
+    #          "panel 5. Everything this report measures happens in the gap between them.",
+    #          ha="center", fontsize=8.2, color=INK)
     fig.savefig(os.path.join(OUT, "fig1_teaser.png")); plt.close(fig)
 
 
