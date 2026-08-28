@@ -613,9 +613,9 @@ retrainings per row.
 
 **Code, data and checkpoints.** Everything is at `github.com/bensapirstein/deepvecfont-v2`, a fork of
 `github.com/yizhiwang96/deepvecfont-v2`. Branch `main` is a pristine mirror of upstream and was
-never committed to, so **`git diff main..submission` is exactly what this project contributed**,
-separated from the roughly fifteen thousand lines of released code it sits on. The delivered
-tree is branch `submission`, tagged `v1.0-submission`. `docs/REPRODUCE.md` runs from a clean
+never committed to, so **`git diff main..submission` is exactly what this project contributed**:
+69 files, against the roughly 4,700 lines of released Python it sits on. The delivered tree is
+branch `submission`, tagged `v1.0-submission`. `docs/REPRODUCE.md` runs from a clean
 conda environment to a rebuilt version of this PDF.
 
 **The model code is one code path.** The reconstruction and the improved model are the same

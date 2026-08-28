@@ -20,10 +20,10 @@ against the spread the unmodified model produces when it is simply re-seeded.
 |---|---|
 | `main` | Pristine mirror of upstream. Never committed to. |
 | `submission` | The delivered project, tagged `v1.0-submission`. Cut from `repro` with the working record removed. |
-| `repro` | The full working branch, kept for provenance: 45 commits, the project plan, and the cluster runbooks behind every number. |
+| `repro` | The full working branch, kept for provenance: the project plan, the cluster runbooks, and the commit history behind every number. |
 
-**Everything we wrote is the `main..submission` diff.** One command shows the entire
-contribution, separated from the ~15k lines of upstream code it sits on:
+**Everything we wrote is the `main..submission` diff.** One command separates the entire
+contribution from the upstream code it sits on:
 
 ```bash
 git diff main..submission --stat
