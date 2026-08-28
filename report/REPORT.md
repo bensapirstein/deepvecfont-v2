@@ -6,7 +6,8 @@ Final project, part 2. Generative Models for Text and Images, Reichman Universit
 
 Paper: Wang, Wang, Yu, Zhu, Lian. *DeepVecFont-v2: Exploiting Transformers to Synthesize
 Vector Fonts with Higher Quality.* CVPR 2023. Course topic: autoregressive models.
-Code: fork of `yizhiwang96/deepvecfont-v2`. All our work is the `main..repro` diff.
+Code: fork of `yizhiwang96/deepvecfont-v2`, released at
+`github.com/bensapirstein/deepvecfont-v2`. All our work is the `main..submission` diff.
 
 ![One letter, five ways](figures/fig1_teaser.png)
 
@@ -610,8 +611,43 @@ retrainings per row.
 13. Lipman, Y., et al. *Flow Matching Guide and Code.* arXiv:2412.06264. On the course reading
     list; basis for the head proposed in section 6.5.
 
-**Code and data.** Upstream: `github.com/yizhiwang96/deepvecfont-v2`, mirrored on branch
-`main`; our work is the `main..repro` diff. Dataset: the authors' released Chinese and English
-vector font sets, built by `data_utils/`. `RESULTS.csv` holds all 140 scored checkpoints, one
-row each. Every figure is regenerated from it by `report/make_figures.py` and every number in
-this report is checked against it by `report/verify_report.py`.
+**Code, data and checkpoints.** Everything is at `github.com/bensapirstein/deepvecfont-v2`, a fork of
+`github.com/yizhiwang96/deepvecfont-v2`. Branch `main` is a pristine mirror of upstream and was
+never committed to, so **`git diff main..submission` is exactly what this project contributed**,
+separated from the roughly fifteen thousand lines of released code it sits on. The delivered
+tree is branch `submission`, tagged `v1.0-submission`. `docs/REPRODUCE.md` runs from a clean
+conda environment to a rebuilt version of this PDF.
+
+**The model code is one code path.** The reconstruction and the improved model are the same
+`train.py`, `models/` and `test_few_shot.py`; E9 is `--enc_noise_std_train 0.5` on the training
+command and nothing else. That holds for all 21 candidates: each is a flag that defaults to the
+released behaviour, and a 196-check preflight script asserts every default reproduces the
+baseline exactly. It is a weaker guarantee than it sounds, since it cannot catch a change that
+is correct and irrelevant, but it does rule out the failure where a candidate appears to help
+because it quietly moved something else as well.
+
+**Data.** The authors' released Chinese and English sets, at their own download links, built by
+`data_utils/`. Two departures are ours and both are one command in `docs/REPRODUCE.md`: the
+Chinese rebuild at the paper's 10× augmentation that section 5.6 required, and the held-out
+validation splits, which are committed as JSON in `data_splits/` because a checkpoint selected
+on a split nobody can reconstruct is a checkpoint selected on nothing.
+
+**Checkpoints** are on Google Drive, linked from the repository README: the Chinese baseline and
+Chinese E9, the English baseline and English E9, seed 1111 in each case, with the run's
+`checkpoint_metrics.csv` alongside so the selection is auditable rather than asserted. The
+three-seed means in section 5.1 come from three such runs each; the released seed is the
+representative draw, and every scored checkpoint in the project has a row in `RESULTS.csv`.
+
+**What the repository deliberately does not carry.** No decode trees, no weights in git, and
+none of the thirty days of runbooks, dated status tables and cluster notes the work actually
+generated. Those stay on the `repro` branch, which is public for anyone who wants the process
+rather than the result; `docs/PROVENANCE.md` on `submission` says where each citation in the
+code points. Model outputs regenerate from the commands, and what was measured from them is in
+`RESULTS.csv` instead.
+
+**Nothing in this report is typed twice.** `RESULTS.csv` holds all 140 scored checkpoints, one
+row each. Every figure is regenerated from it by `report/make_figures.py` and
+`report/make_model_comparison_figures.py`, and every number quoted here is re-derived from it
+and checked by `report/verify_report.py`, 81 assertions that exit non-zero on any mismatch and
+that gate the PDF build. A figure or a number that has drifted from the results table stops the
+build rather than reaching a submission.

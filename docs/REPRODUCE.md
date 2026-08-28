@@ -269,7 +269,7 @@ bash report/build.sh
 ```
 
 Regenerates all nine figures from `RESULTS.csv`, re-derives every number quoted in
-`REPORT.md` and checks it (63 assertions, non-zero exit on any mismatch), then runs pandoc.
+`REPORT.md` and checks it (81 assertions, non-zero exit on any mismatch), then runs pandoc.
 The verifier gates the build, so a number that has drifted from the results table stops the
 PDF instead of reaching the submission. Needs `pandoc` and `xelatex` on PATH; the figure
 steps need only `numpy` and `matplotlib`.
