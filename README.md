@@ -74,7 +74,7 @@ Two notes that matter for reproducing our numbers rather than upstream's:
 
 Our trained weights, four runs, one seed each:
 
-> **Google Drive: _(link to be added)_**
+> **Google Drive: [dvf_release](https://drive.google.com/drive/folders/1UNJARldxCeu_Af5_QDHYFK910dFLAObg?usp=sharing)**
 
 | Archive | What it is | Report table |
 |---|---|---|
