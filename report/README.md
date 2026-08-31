@@ -8,8 +8,10 @@ hand-maintained: the figures and the PDF are generated, and the numbers are chec
 | `REPORT.md` | The report. Source of truth, edited by hand. |
 | `REPORT.pdf` | Built from `REPORT.md`. Do not edit; rebuild it. |
 | `build.sh` | Regenerates figures, verifies every number, then builds the PDF. |
-| `make_figures.py` | Draws the results figures (3-6) from `../RESULTS.csv`. |
+| `head.tex` | LaTeX preamble the build passes to pandoc: tables one size down, figures capped at the text width. |
+| `make_figures.py` | Draws the results figures (3-6) from `../RESULTS.csv`. Figures 4 and 5 are generated but not used by the current report. |
 | `make_glyph_figures.py` | Draws the explanatory figures (1-2) from real test-split outlines. |
+| `make_model_comparison_figures.py` | Draws the qualitative figures (7-9) from `assets/model_output_*`. |
 | `extract_assets.py` | Pulls those outlines out of `../data.zip` into `assets/glyphs.npz`. Rarely needed; the npz is committed. |
 | `verify_report.py` | Re-derives every number quoted in `REPORT.md` from `../RESULTS.csv`. Exits non-zero on any mismatch. |
 | `figures/` | Generated output. Safe to delete; `build.sh` recreates it. |
@@ -24,6 +26,12 @@ bash report/build.sh
 That runs the figures, then the verifier, then pandoc. **The verifier gates the
 build**, so a number that has drifted from `RESULTS.csv` stops the PDF rather than
 reaching the submission.
+
+The reader matters: the build passes `--from=markdown-implicit_figures`, not `gfm`. Pandoc's
+gfm reader ignores pipe-table column widths and emits columns that cannot wrap, which pushes
+the wide result tables off the page. The dashes in each table's delimiter row are therefore
+load-bearing — they set the relative column widths — and images stay inline rather than
+floating.
 
 ## The rule this folder exists to enforce
 

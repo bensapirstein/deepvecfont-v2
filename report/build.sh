@@ -14,7 +14,7 @@ python3 "$HERE/verify_report.py"
 
 cd "$HERE"   # relative figure paths in REPORT.md resolve from here
 pandoc REPORT.md -o REPORT.pdf \
-  --pdf-engine=xelatex --from=gfm \
+  --pdf-engine=xelatex --from=markdown-implicit_figures -H head.tex \
   -V geometry:a4paper -V geometry:margin=2.4cm \
   -V mainfont="DejaVu Serif" -V sansfont="DejaVu Sans" -V monofont="DejaVu Sans Mono" \
   -V fontsize=10pt -V linkcolor=black -V urlcolor=black -V colorlinks=true

@@ -1,0 +1,5 @@
+% Tables are set a step smaller so the wide result tables fit the text block.
+\usepackage{etoolbox}
+\AtBeginEnvironment{longtable}{\small}
+% Cap every figure at the text width so nothing overflows the margin.
+\setkeys{Gin}{width=0.9\linewidth,keepaspectratio}

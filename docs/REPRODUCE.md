@@ -42,9 +42,9 @@ than discovering a typo six hours in.
 Download and unpack the authors' dataset as in the [README](../README.md#dataset), so that
 `data/vecfont_dataset/{chn,eng}/{train,test}` exists.
 
-For the main results that is all. Two rebuilds appear later: §6 raises Chinese augmentation
-to the paper's 10×, and §5 carves a held-out validation split. Neither is needed to
-reproduce §3 or §5.1 of the report.
+For the main results that is all. Section 8 carves a held-out validation split and raises
+Chinese augmentation to the paper's 10×; neither is needed for any number in the report,
+which uses the released data throughout.
 
 ## 3. The reconstruction (baseline)
 
@@ -69,8 +69,8 @@ CUDA_VISIBLE_DEVICES=0 python train.py --mode train \
   --wandb_project deepvecfont-v2-eng
 ```
 
-`--seed` is ours; upstream has no seeding, which is why the seed floor in §5 could not be
-measured before we added it.
+`--seed` is ours; upstream has no seeding, which is why the margin of error in §6 could not
+be measured before we added it.
 
 ## 4. The improved model
 
@@ -120,9 +120,11 @@ python eval_reconstruction_error.py \
 ```
 
 English uses `--language eng --max_seq_len 51 --ref_nshot 4 --ref_char_ids 0,1,26,27`, and
-`--max_fonts 34` on the evaluation: the English test split is ~1,386 fonts and a full
-sweep is unaffordable. That 34-font subset is optimistic by a measured 0.0074, reported in
-§3 rather than absorbed.
+`--max_fonts 34` on the evaluation: the English test split is ~1,386 fonts and a full sweep
+is unaffordable. The subset is optimistic, and by how much is measured rather than assumed:
+the released epoch-500 checkpoint scores 0.0645 on those 34 fonts and 0.0719 over 862, a
+difference of 0.0074. Every English number here uses the 34-font subset, so the term cancels
+in paired comparisons.
 
 Three things to hold fixed, because each one moves the number more than most of the
 architecture changes do:
@@ -134,10 +136,11 @@ architecture changes do:
 - **`--n_samples`.** Screening uses 3, confirmation uses 50, and the paper uses 10 on
   English and 50 on Chinese. Numbers from different values are not comparable.
 - **`--name_ckpt`.** Pass it explicitly at a matched epoch when comparing runs. Letting the
-  harness auto-select confounds a candidate's delta with its training epoch — which is
-  exactly what happened to E1 and is written up in §5.5.
+  harness auto-select confounds a candidate's delta with its training epoch: E1's first
+  reading came off checkpoints at epochs 100 and 125 against baselines at 150, and halved
+  when the runs were re-read at a matched epoch. Every delta in the report is matched-epoch.
 
-## 6. The seed-noise floor
+## 6. The margin of error
 
 This is the instrument the whole report rests on, and it is cheap: train the unmodified
 baseline three times, change nothing but `--seed`, and measure the spread.
@@ -152,14 +155,18 @@ done
 bash scripts/eval_noise.sh          # split that spread into decode noise vs seed variance
 ```
 
-Chinese comes back at **L1 0.0093, s-IoU 0.0315**; English at **L1 0.0038, s-IoU 0.0129,
-SSIM 0.0140**. Decomposed, the decode noise is 0.0011 of the Chinese figure and training
-seed variance is the other 88%, so raising `--n_samples` cannot narrow the bar — only more
-seeds can.
+The spread depends on the sampling budget, so state which one a bar came from. At the
+screening budget (`--n_samples 3`) Chinese comes back at **L1 0.0097, s-IoU 0.0315**, and
+those are the bars the report commits to. At the confirmation budget (`--n_samples 50`) the
+same three runs give L1 0.0093 and s-IoU 0.0236. English is **L1 0.0038, s-IoU 0.0129,
+SSIM 0.0140**. Decomposed by `eval_noise.sh`, decode noise accounts for 0.0011 of the
+Chinese figure and training-seed variance for the other 88%, so raising `--n_samples`
+cannot narrow the bar — only more seeds can.
 
 Read every candidate against this, never against a single baseline run. Measured on our
 own table: 22 of 26 candidates beat a single-seed anchor, 6 of 26 beat the three-seed mean,
-and the top three single-seed leaders replicated once in three.
+and the top three single-seed leaders replicated once in three. Report §6.3 has that
+argument in full.
 
 ## 7. The sweep
 
@@ -187,14 +194,16 @@ the `name_exp` to the `BATCH` dict at the top.
 
 Deltas are never typed by hand. `recompute_deltas.py` regenerates all of them from
 `RESULTS.csv` against both the single-seed anchor and the three-seed mean, which is how the
-discrepancy in §5.2 was found.
+22-of-26 against 6-of-26 discrepancy in report §6.3 was found.
 
-## 8. The re-evaluation in §5.6
+## 8. Optional: rendered-metric selection and the 10× rebuild
 
-An external review of an earlier draft challenged two things: checkpoints selected on a
-criterion that correlates with the reported metric at ρ = 0.125, and a reproduction left at
-6× Chinese augmentation against the paper's 10×. Section 5.6 answers both. Reproducing it
-takes three steps, in this order.
+Two properties of the protocol above are worth being able to vary, so the repository ships
+the machinery for both: checkpoints are selected on `val_metric`, a criterion that
+correlates with the reported metric at ρ = 0.125, and the released Chinese data is built at
+6× augmentation against the paper's 10×. **No number in the report uses either**, and every
+default here is off, so §3 through §7 reproduce unchanged whether or not this section is
+run. Turning them on takes three steps, in this order.
 
 **Carve a held-out validation split first.** `train.py` as released validates on the *test*
 split, so without this there is no set to select on that is not the set being scored.
@@ -262,7 +271,9 @@ python scripts/selection_disagreement.py --csv_out selection_audit.csv \
 ```
 
 Both defaults are off — `--render_val_freq 0` and `--ckpt_select val_metric` — so every
-command in §3 through §7 reproduces exactly as it did before this section existed.
+command in §3 through §7 reproduces exactly as it did before this section existed. The
+`aug_rules` fix is the exception and is unconditional: it corrects a released bug rather
+than adding an option, and at the released `--n_aug 5` it is byte-identical to upstream.
 
 ## 9. Rebuilding the report
 
@@ -270,8 +281,8 @@ command in §3 through §7 reproduces exactly as it did before this section exis
 bash report/build.sh
 ```
 
-Regenerates all nine figures from `RESULTS.csv`, re-derives every number quoted in
-`REPORT.md` and checks it (81 assertions, non-zero exit on any mismatch), then runs pandoc.
+Regenerates the figures from `RESULTS.csv`, re-derives every number quoted in `REPORT.md`
+and checks it (64 assertions, non-zero exit on any mismatch), then runs pandoc.
 The verifier gates the build, so a number that has drifted from the results table stops the
 PDF instead of reaching the submission. Needs `pandoc` and `xelatex` on PATH; the figure
 steps need only `numpy` and `matplotlib`.

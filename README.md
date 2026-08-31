@@ -43,7 +43,7 @@ is the reference.
 |---|---|---|
 | 1 | **Reconstructed model** + training and evaluation code | `models/`, `train.py`, `test_few_shot.py`, `eval_reconstruction_error.py`. Trained with the baseline command in [`docs/REPRODUCE.md`](docs/REPRODUCE.md) §3. |
 | 2 | **Improved model** + training and evaluation code | Same code path. The improved configuration (E9) is `--enc_noise_std_train 0.5`; all 21 candidates are flags on the same entry points, so a candidate's default reproduces the baseline exactly. [`docs/REPRODUCE.md`](docs/REPRODUCE.md) §4. |
-| 3 | **Dataset** | The authors' released dataset, download links below. Our Chinese rebuild at the paper's 10× augmentation is one command over it, and the held-out validation splits we carved are committed in [`data_splits/`](data_splits/). |
+| 3 | **Dataset** | The authors' released dataset, download links below, unchanged for every reported number. The optional Chinese rebuild at the paper's 10× augmentation is one command over it, and the held-out validation splits it needs are committed in [`data_splits/`](data_splits/). |
 | — | Trained checkpoints | Google Drive, link below. |
 
 ---
@@ -67,8 +67,8 @@ Two notes that matter for reproducing our numbers rather than upstream's:
   [`statics/v1_train_font_ids.txt`](statics/v1_train_font_ids.txt) and
   [`statics/v1_test_font_ids.txt`](statics/v1_test_font_ids.txt).
 - The released Chinese `vecfont_dataset` is built at **6× augmentation**, not the 10× the
-  paper states in Sec. 4.1. Section 5.6 of the report re-runs the sweep on a 10× rebuild;
-  [`docs/REPRODUCE.md`](docs/REPRODUCE.md) §6 is the one command that produces it.
+  paper states in Sec. 4.1. Every number in the report uses the released 6× build;
+  [`docs/REPRODUCE.md`](docs/REPRODUCE.md) §8 has the one command that rebuilds it at 10×.
 
 ### Checkpoints
 
@@ -102,7 +102,11 @@ pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 \
 pip install tensorboardX einops timm scikit-image cairosvg pandas scipy
 ```
 
-Score a released checkpoint, which is the shortest path to a number in the report:
+Score a released checkpoint, which is the shortest path to a number in the report. Unpack
+the archive so the checkpoint sits where the entry points look for it —
+`experiments/<name_exp>_main_model/checkpoints/<file>.ckpt`, since `train.py` and
+`test_few_shot.py` both append `_<model_name>` to `--name_exp` — and pass its filename as
+`--name_ckpt`:
 
 ```bash
 # decode the test split, best-of-50 candidates per glyph
@@ -117,7 +121,7 @@ python eval_reconstruction_error.py \
   --name_ckpt <ckpt> --gt_source raster
 ```
 
-Training, the improved model, the seed floor and the full sweep are all in
+Training, the improved model, the margin of error and the full sweep are all in
 **[`docs/REPRODUCE.md`](docs/REPRODUCE.md)**.
 
 ---
@@ -135,12 +139,12 @@ three-seed means ± sample standard deviation.
 Two things this table is doing at once. Our Chinese reconstruction lands **0.0008** from
 the authors' own released weights scored through the same code, so the reproduction is
 faithful and the distance to the published 0.080 is a property of the evaluation rather
-than of our training — report §3 measures where it lives. And the improved model's Chinese
-gain, while same-signed at every seed on all three metrics, sits **inside** the 0.0097
-seed-noise floor we committed to before running anything, so §5.3 reports it as a
-direction rather than as a gain of a stated size.
+than of our training — report §3 makes that comparison. And the improved model's Chinese
+gain, while same-signed at every seed on all three metrics, is **smaller** than the 0.0097
+margin of error we committed to before running anything, so §5.2 reports it as a direction
+rather than as a gain of a stated size.
 
-That floor is the point of the project. Twenty-six candidate configurations span 0.0101
+That margin is the point of the project. Twenty-six candidate configurations span 0.0101
 between them; three re-seedings of the unmodified model span 0.0097.
 
 Every figure and every number in the report is regenerated from
@@ -157,7 +161,7 @@ eval_reconstruction_error.py                      the paper's metric, our implem
 render_val.py                                     rendered-metric checkpoint selection
 data_utils/                                       upstream dataset pipeline (+ augment fix)
 data_splits/                                      the held-out val splits we carved
-scripts/                                          sweep drivers, the seed floor, analysis
+scripts/                                          sweep drivers, the seed runs, analysis
 report/                                           REPORT.md, figures, the number verifier
 RESULTS.csv                                       every scored checkpoint, one row each
 docs/REPRODUCE.md                                 end-to-end reproduction

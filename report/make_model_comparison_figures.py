@@ -16,7 +16,7 @@ numpy does.
 Reading rule, from docs/pull-figure-assets.md, applied here:
   1. Fonts/characters were chosen before any glyph was looked at (font 0000,
      chars 10/20/30/40 -- see render_model_output.py).
-  2. Where E9 looks better in fig7, that is one case, not evidence: section 5.3
+  2. Where E9 looks better in fig7, that is one case, not evidence: section 5.2
      of REPORT.md already finds E9's Chinese mean does not clear its floor.
   3. fig9 is the failure strip this rule requires: real worst-case Chinese
      glyphs, chosen by L1, not by eye. fig8 is its mirror at the other tail,
@@ -104,8 +104,8 @@ def compare():
                     ax.set_ylabel(row_labels[rows.index(r)], fontsize=7.6, color=INK)
 
     fig.text(.5, -.01,
-             "Same font, same four characters, both languages. Not a claim: section 5.3's "
-             "reading is that E9's Chinese mean does not clear its own noise floor, and a "
+             "Same font, same four characters, both languages. Not a claim: section 5.2's "
+             "reading is that E9's Chinese mean does not beat the margin of error, and a "
              "picture cannot upgrade that -- this is what the numbers in section 5 look like "
              "as glyphs, nothing more.",
              ha="center", va="top", fontsize=7.6, color=GREY, wrap=True)
@@ -167,9 +167,7 @@ def worst():
                  "(chosen by the number, not by eye)", fontsize=9, color=INK, y=1.01)
     fig.text(.5, -.04,
              "The reported Chinese Error is 0.163 averaged over 34 fonts; these are what "
-             "0.16-ish actually looks like at the tail, not the average case. Section 3's "
-             "point that the metric is floor-dominated on Chinese (0.142 of any score is "
-             "cross-rasterizer disagreement, not model error) applies here too.",
+             "0.16-ish actually looks like at the tail, not the average case.",
              ha="center", fontsize=7.4, color=GREY, wrap=True)
     fig.savefig(os.path.join(OUT, "fig9_failures.png")); plt.close(fig)
 

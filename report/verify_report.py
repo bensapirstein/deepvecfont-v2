@@ -74,18 +74,18 @@ chk("rasterizer gap, eng",    f(oe,'l1') - f(one(name_exp="official_eng", epoch=
 chk("N=50 vs N=10, eng",      f(one(name_exp="eng_seedfloor_1111", epoch=640, n_samples=10),'l1')
                               - f(one(name_exp="eng_seedfloor_1111", epoch=640, n_samples=50),'l1'), 0.0027)
 
-print("\n-- section 4, the floor --")
-chk("chn floor (screening)",  spread([f(r,'l1')    for r in cb3]), 0.0097)
-chk("chn s-IoU floor",        spread([f(r,'s_iou') for r in cb3]), 0.0315)
-chk("eng floor",              spread([f(r,'l1')    for r in eb]),  0.0038)
-chk("chn s-IoU floor, n=50",  spread([f(r,'s_iou') for r in cb]),  0.0236)
+print("\n-- section 4, the margin of error --")
+chk("chn margin (screening)",  spread([f(r,'l1')    for r in cb3]), 0.0097)
+chk("chn s-IoU margin",        spread([f(r,'s_iou') for r in cb3]), 0.0315)
+chk("eng margin",              spread([f(r,'l1')    for r in eb]),  0.0038)
+chk("chn s-IoU margin, n=50",  spread([f(r,'s_iou') for r in cb]),  0.0236)
 
 print("\n-- section 5, the sweep --")
 cands = [f(r,'l1') for r in R if r['language']=='chn' and r['n_samples']=='3'
          and r['batch'] in ('tier1','tier2','tier3a') and not r['name_exp'].startswith('seedfloor')]
 chk("candidate count", len(cands), 26, tol=.5)
 chk("candidate spread", spread(cands), 0.0101)
-print("\n-- section 5.3, E9 chinese --")
+print("\n-- section 5.2, E9 chinese --")
 for i, s in enumerate((1111, 2222, 3333)):
     chk(f"E9 chn seed {s} L1",    f(ce[i],'l1'),    [0.1588,0.1531,0.1623][i])
     chk(f"E9 chn seed {s} dL1",   f(ce[i],'l1')   - f(cb[i],'l1'),    [-0.0074,-0.0038,-0.0009][i])
@@ -96,7 +96,7 @@ chk("E9 chn mean SSIM",  mean([f(r,'ssim')  for r in ce]), 0.4479)
 chk("E9 chn delta L1",   mean([f(r,'l1')    for r in ce]) - mean([f(r,'l1')    for r in cb]), -0.0040)
 chk("E9 chn delta s-IoU",mean([f(r,'s_iou') for r in ce]) - mean([f(r,'s_iou') for r in cb]),  0.0271)
 
-print("\n-- section 5.4, E9 english --")
+print("\n-- section 5.3, E9 english --")
 chk("E9 eng mean L1",    mean([f(r,'l1')    for r in ee]), 0.0601)
 chk("E9 eng mean s-IoU", mean([f(r,'s_iou') for r in ee]), 0.7305)
 chk("E9 eng mean SSIM",  mean([f(r,'ssim')  for r in ee]), 0.7358)
@@ -116,25 +116,11 @@ for k, pre, cl, ci in (("E2","c_e2_batchnorm",-0.0066,0.0221), ("E4","c_e4_ngf32
     chk(f"{k} mean ds-IoU", mean([f(g(s),'s_iou')-f(base[s],'s_iou') for s in base]), ci)
 
 print("\n-- section 5.5, E1 --")
-o1 = {1111:("e1_norm_chn",150), 2222:("e1_norm_2222_chn",125), 3333:("e1_norm_3333_chn",100)}
-chk("E1 as first read", mean([f(one(name_exp=n,epoch=e,n_samples=3),'s_iou')-f(base[s],'s_iou')
-                              for s,(n,e) in o1.items()]), -0.0760)
 m1 = {1111:"e1_norm_chn", 2222:"a_e1_norm_2222_chn", 3333:"a_e1_norm_3333_chn"}
 chk("E1 at matched epoch", mean([f(one(name_exp=n,epoch=150,n_samples=3),'s_iou')-f(base[s],'s_iou')
                                  for s,n in m1.items()]), -0.0376)
-
-print("\n-- section 5.6, post-review batch --")
-rvb = {s: one(name_exp=f"rv_seedfloor_{s}_chn", epoch=150, n_samples=50) for s in (1111, 2222, 3333)}
-chk("rv-review chn L1 floor",   spread([f(r,'l1')    for r in rvb.values()]), 0.0151)
-chk("rv-review chn s-IoU floor",spread([f(r,'s_iou') for r in rvb.values()]), 0.0223)
-rvbase = rvb[1111]
-for k, pre, cl, ci in (("E9","rv_e9_sigma050",0.0064,-0.0052), ("E1","rv_e1_norm",0.0021,-0.0310),
-                       ("E2","rv_e2_batchnorm",-0.0068,0.0357), ("E4","rv_e4_ngf32",0.0048,-0.0039),
-                       ("E5","rv_e5_bneck256",0.0014,0.0031),   ("E7","rv_e7_aux01",0.0027,-0.0048),
-                       ("E11","rv_e11_adamw",0.0014,0.0000),    ("E3","rv_e3_refine2",0.0061,-0.0137)):
-    g = lambda s: one(name_exp=f"{pre}_{s}_chn", epoch=150, n_samples=50)
-    chk(f"rv {k} mean dL1",    mean([f(g(s),'l1')   -f(rvbase,'l1')    for s in rvb]), cl)
-    chk(f"rv {k} mean ds-IoU", mean([f(g(s),'s_iou')-f(rvbase,'s_iou') for s in rvb]), ci)
+chk("E1 at matched epoch, L1", mean([f(one(name_exp=n,epoch=150,n_samples=3),'l1')-f(base[s],'l1')
+                                     for s,n in m1.items()]), -0.0015)
 
 print("\n-- section 6.5, quantization oracle --")
 # oracle_chn.csv is one row per font; every figure quoted is the column mean over 34 fonts.

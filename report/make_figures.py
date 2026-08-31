@@ -120,7 +120,7 @@ for ax, (lang, d, floor) in zip(axes, [("Chinese", chn_d, 0.0097), ("English", e
     ax.set_ylim(lo - pad, hi + pad)
 axes[0].set_ylabel("Δ Error (L1) vs paired baseline\nnegative = better")
 fig.suptitle("The one improvement we found does not survive a change of script\n"
-             "shaded band is the seed-noise floor", fontsize=9.5, x=.02, ha="left", y=1.09)
+             "shaded band is the margin of error", fontsize=9.5, x=.02, ha="left", y=1.09)
 fig.savefig(f"{OUT}/fig6_e9.png"); plt.close(fig)
 
 # ---------------------------------------------------------------- figure 4
