@@ -1,7 +1,0 @@
-tag,ckpt_path,language,val_metric,val_img_l1,val_img_vggpt,val_svg_total,val_svg_para_total,val_svg_cmd,val_svg_args,val_svg_aux
-official_eng_500,experiments/official_eng_main_model/checkpoints/500_160821.ckpt,eng,3.035680,0.064312,14.727688,1.352458,0.892826,0.161708,1.126850,1.661983
-official_eng_550,experiments/official_eng_main_model/checkpoints/550_176871.ckpt,eng,3.075035,0.065570,14.774623,1.361152,0.910433,0.163648,1.130248,1.953372
-official_eng_600,experiments/official_eng_main_model/checkpoints/600_192921.ckpt,eng,3.033612,0.062784,14.098930,1.356115,0.908668,0.166549,1.123686,1.838058
-official_chn_500,experiments/official_chn_main_model/checkpoints/500_20040.ckpt,chn,7.260500,0.155208,21.159050,3.018562,2.478271,0.486228,2.319338,2.777110
-official_chn_550,experiments/official_chn_main_model/checkpoints/550_22040.ckpt,chn,7.447069,0.152654,19.943510,3.009258,2.711832,0.411521,2.435739,2.350737
-official_chn_600,experiments/official_chn_main_model/checkpoints/600_24040.ckpt,chn,8.134117,0.147683,19.420681,3.439594,3.023489,0.710117,2.527275,2.870817

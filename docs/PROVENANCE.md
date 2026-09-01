@@ -32,14 +32,15 @@ written down.
 | For | Read |
 |---|---|
 | Running anything | `docs/REPRODUCE.md` |
-| What was found | `report/REPORT.md` |
-| The numbers behind it | `RESULTS.csv`, and `report/verify_report.py` which checks them |
+| What was found | `REPORT.pdf`, submitted separately from this repository |
+| The numbers behind it | `RESULTS.csv` here; the verifier that checks them ships with the report |
 | The head we designed and dropped | `archive/FLOW_MATCHING_PLAN.md`, cited by report §6.5 |
 
 One rule that lived in a dropped runbook is worth restating, because it governs three
 figures in the report and a reader cannot check it from the pictures alone. Qualitative
 glyph figures pick their fonts and characters **before** any glyph is looked at, show both
 tails of the error distribution rather than only the flattering end, and give Chinese and
-English equal space. `report/make_model_comparison_figures.py` states the full rule in its
-own docstring and the figures are laid out from arrays that already exist, so no shape in
-the report was chosen by eye after the fact.
+English equal space. The report's `make_model_comparison_figures.py` (it ships with the
+report, not this repository) states the full rule in its own docstring, and the figures are
+laid out from arrays that already exist, so no shape in the report was chosen by eye after
+the fact.

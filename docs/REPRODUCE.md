@@ -1,6 +1,6 @@
 # Reproducing this project
 
-Every number in `report/REPORT.md` comes from the commands below. They are the working
+Every number in the report comes from the commands below. They are the working
 commands, not idealised ones: the flags that look redundant are the ones that fail
 silently when they are missing, and each is noted where it appears.
 
@@ -275,17 +275,13 @@ command in §3 through §7 reproduces exactly as it did before this section exis
 `aug_rules` fix is the exception and is unconditional: it corrects a released bug rather
 than adding an option, and at the released `--n_aug 5` it is byte-identical to upstream.
 
-## 9. Rebuilding the report
+## 9. The report
 
-```bash
-bash report/build.sh
-```
+The written report (`REPORT.md` / `REPORT.pdf`, its figures, and its build and
+verification scripts) is not part of this repository. It is submitted separately, and its
+own verifier re-derives every quoted number from a copy of `RESULTS.csv` and fails the
+build on any drift, so a number that has drifted from this repository's results table
+cannot reach the submitted PDF.
 
-Regenerates the figures from `RESULTS.csv`, re-derives every number quoted in `REPORT.md`
-and checks it (64 assertions, non-zero exit on any mismatch), then runs pandoc.
-The verifier gates the build, so a number that has drifted from the results table stops the
-PDF instead of reaching the submission. Needs `pandoc` and `xelatex` on PATH; the figure
-steps need only `numpy` and `matplotlib`.
-
-Nothing in the report is typed twice. If a number changes, it changes in `RESULTS.csv` and
-everything downstream follows.
+Nothing in the report is typed twice. If a number in `RESULTS.csv` here changes, the
+report's copy needs to be refreshed and rebuilt to match.

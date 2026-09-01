@@ -94,27 +94,19 @@ target/
 profile_default/
 ipython_config.py
 
-# --- report assets -----------------------------------------------------------
-# Tarballs from the cluster figure-asset pull (docs/pull-figure-assets.md). The
-# unpacked HTML under report/assets/ is small and IS tracked, so the figures stay
-# reproducible from a clone; the archive itself is not.
+# --- report material -----------------------------------------------------------
+# The written report (REPORT.md, figures, build/verification scripts) and the small
+# evidence CSVs that back it now live outside this repository, in the sibling folder
+# deepvecfont-v2-report/, and are submitted separately. Ignored here so a regenerated
+# copy of any of them is never re-tracked by accident.
+report/
+oracle_chn.csv
+oracle_eng_subset34.csv
+selection_audit.csv
+val_metric_audit.csv
+
 *.tar.gz
 *.tgz
-
-# Deliberately NOT ignored, so a fresh clone can rebuild the submission:
-#   report/figures/*.png              generated, but data.zip is ignored, so a
-#                                      clone could not otherwise show them
-#   report/assets/glyphs.npz          the 0.07 MB glyph input, extracted from data.zip
-#   report/assets/model_output/       real model-output SVGs pulled off the cluster
-#                                      (docs/pull-figure-assets.md), 24 small HTML files
-#   report/assets/model_output_l1.csv per-glyph L1 over that pull (rank_failures.py,
-#                                      cluster-only, needs cairosvg)
-#   report/assets/model_output_renders.npz  rasterized crops of the above
-#                                      (render_model_output.py, cluster-only,
-#                                      needs cairosvg) -- committed so
-#                                      make_model_comparison_figures.py needs
-#                                      nothing beyond numpy on the Mac
-#   report/REPORT.pdf                 the deliverable itself
 
 # Papers. Linked from README.md rather than vendored: they are large, they are not
 # ours to redistribute, and arXiv is a more durable address than a git blob.

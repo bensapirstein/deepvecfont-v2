@@ -10,7 +10,7 @@ We reproduce the model on Chinese and English, check the reproduction against th
 released weights, and run 21 single-factor architectural changes against it — each judged
 against the spread the unmodified model produces when it is simply re-seeded.
 
-**Report: [`report/REPORT.pdf`](report/REPORT.pdf)** (source: [`report/REPORT.md`](report/REPORT.md))
+**Report:** submitted separately as `REPORT.pdf`; this repository is the code deliverable.
 
 ---
 
@@ -148,8 +148,8 @@ That margin is the point of the project. Twenty-six candidate configurations spa
 between them; three re-seedings of the unmodified model span 0.0097.
 
 Every figure and every number in the report is regenerated from
-[`RESULTS.csv`](RESULTS.csv) at build time and checked by
-[`report/verify_report.py`](report/verify_report.py), which fails the build on any drift.
+[`RESULTS.csv`](RESULTS.csv) at build time and checked by a verifier that fails the build on
+any drift; both the report and its verifier ship separately from this repository.
 
 ---
 
@@ -162,7 +162,6 @@ render_val.py                                     rendered-metric checkpoint sel
 data_utils/                                       upstream dataset pipeline (+ augment fix)
 data_splits/                                      the held-out val splits we carved
 scripts/                                          sweep drivers, the seed runs, analysis
-report/                                           REPORT.md, figures, the number verifier
 RESULTS.csv                                       every scored checkpoint, one row each
 docs/REPRODUCE.md                                 end-to-end reproduction
 docs/PROVENANCE.md                                where the code's PROJECT_PLAN citations point
@@ -173,8 +172,11 @@ archive/FLOW_MATCHING_PLAN.md                     the head we designed, costed a
 
 Model outputs, checkpoints and decode trees are not committed. They are large, they
 regenerate from the commands above, and the numbers derived from them are in `RESULTS.csv`
-instead. The papers themselves are linked, not vendored. The working branch `repro` holds
-the project plan and the cluster runbooks if you want the process rather than the result.
+instead. The papers themselves are linked, not vendored. Nor is the written report:
+`REPORT.md`, its figures, its build and verification scripts, and the small evidence CSVs
+that back it (oracle grid costs, checkpoint-selection audits) live outside this repository
+and are submitted separately as `REPORT.pdf`. The working branch `repro` holds the project
+plan and the cluster runbooks if you want the process rather than the result.
 
 ## Upstream
 
